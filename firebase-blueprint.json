@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A product in the catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "code": { "type": "string", "description": "Product code" },
+        "name": { "type": "string", "description": "Product name" },
+        "category": { "type": "string", "description": "Category ID" },
+        "image": { "type": "string", "description": "Base64 or URL image" },
+        "price": { "type": "number", "description": "Price" },
+        "rating": { "type": "number", "description": "Rating" },
+        "description": { "type": "string", "description": "Description" },
+        "isLocal": { "type": "boolean", "description": "Is local product" },
+        "isSeasonal": { "type": "boolean", "description": "Is seasonal product" },
+        "size": { "type": "number", "description": "Size in ml/g" }
+      },
+      "required": ["id", "name", "category", "image"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "A product category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "description": "Category name" },
+        "icon": { "type": "string", "description": "Lucide icon name" },
+        "section": { "type": "string", "enum": ["produce", "juices", "other"] }
+      },
+      "required": ["id", "name", "icon", "section"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User ID" },
+        "email": { "type": "string", "description": "User email" },
+        "role": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of products"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Collection of categories"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles"
+    }
+  }
+}

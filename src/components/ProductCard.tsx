@@ -7,7 +7,7 @@ import { CATEGORIES } from '../constants';
 interface ProductCardProps {
   product: Product;
   onClick: (product: Product) => void;
-  isAdminMode?: boolean;
+  isAdmin?: boolean;
   onDelete?: (id: string) => void;
   onToggleLocal?: (id: string) => void;
   onToggleSeasonal?: (id: string) => void;
@@ -18,7 +18,7 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = React.memo(({ 
   product, 
   onClick, 
-  isAdminMode, 
+  isAdmin, 
   onDelete, 
   onToggleLocal, 
   onToggleSeasonal,
@@ -38,11 +38,11 @@ export const ProductCard: React.FC<ProductCardProps> = React.memo(({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      whileTap={!isAdminMode ? { scale: 0.96 } : {}}
-      onClick={() => !isAdminMode && onClick(product)}
-      draggable={isAdminMode}
+      whileTap={!isAdmin ? { scale: 0.96 } : {}}
+      onClick={() => !isAdmin && onClick(product)}
+      draggable={isAdmin}
       onDragStart={(e: React.DragEvent<HTMLDivElement>) => {
-        if (isAdminMode) {
+        if (isAdmin) {
           e.dataTransfer.setData('productId', product.id);
           e.dataTransfer.effectAllowed = 'move';
         } else {
@@ -54,7 +54,7 @@ export const ProductCard: React.FC<ProductCardProps> = React.memo(({
           ? 'flex flex-row items-center p-3 gap-4 hover:bg-slate-50' 
           : 'flex flex-col h-full hover:shadow-md'
       } ${
-        !isAdminMode ? 'ios-active cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+        !isAdmin ? 'ios-active cursor-pointer' : 'cursor-grab active:cursor-grabbing'
       }`}
     >
       {/* Product Code Tag - Only in Grid Mode */}
@@ -65,7 +65,7 @@ export const ProductCard: React.FC<ProductCardProps> = React.memo(({
       )}
 
       {/* Admin Controls Overlay */}
-      {isAdminMode && (
+      {isAdmin && (
         <div className={`absolute z-20 flex gap-2 bg-white/80 backdrop-blur-md p-2 rounded-2xl shadow-lg border border-black/10 ${viewMode === 'list' ? 'right-4 top-1/2 -translate-y-1/2 flex-row' : 'bottom-2 right-2 flex-row'}`}>
           <button 
             onClick={(e) => { e.stopPropagation(); onDelete?.(product.id); }}
