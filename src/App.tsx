@@ -5,82 +5,16 @@
 
 import React, { useState, useMemo, useRef, ChangeEvent, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Leaf, MapPin, Calendar, Menu, X, ChevronRight, LayoutGrid, Trash2, ArrowLeft, CupSoda, List as ListIcon, Grid as GridIcon, ArrowDownAZ, ArrowUpZA, Clock, Ruler, LogIn, LogOut } from 'lucide-react';
+import { Search, Leaf, MapPin, Calendar, Menu, X, ChevronRight, LayoutGrid, Trash2, ArrowLeft, CupSoda, List as ListIcon, Grid as GridIcon, ArrowDownAZ, ArrowUpZA, Clock, Ruler } from 'lucide-react';
 import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
-import { CATEGORIES, PRODUCTS } from './constants';
+import { CATEGORIES } from './constants';
 import { Product } from './types';
-import { db, auth } from './lib/firebase';
-import { 
-  collection, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  query, 
-  orderBy,
-  writeBatch
-} from 'firebase/firestore';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  return errInfo;
-};
+import { saveProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
+import { auth } from './firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -126,10 +60,11 @@ const fileToBase64 = (file: File): Promise<string> => {
 };
 
 export default function App() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customLogo, setCustomLogo] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [appSection, setAppSection] = useState<'home' | 'produce' | 'juices'>('home');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -157,52 +92,76 @@ export default function App() {
     setTimeout(() => setToastMessage(null), duration);
   };
 
-  // Auth Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    testConnection();
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthReady(true);
     });
-    return () => unsubscribe();
+    return () => unsubscribeAuth();
   }, []);
 
-  // Firestore Listener
   useEffect(() => {
-    const q = query(collection(db, 'products'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const productsData = snapshot.docs.map(doc => doc.data() as Product);
-      if (productsData.length > 0) {
-        setProducts(productsData);
+    if (!isAuthReady || !user) return;
+
+    const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
+      if (updatedProducts && updatedProducts.length > 0) {
+        setProducts(updatedProducts);
       } else {
-        // Fallback to constants if Firestore is empty
-        setProducts(PRODUCTS);
+        // If no products in Firestore, try loading defaults if it's the first time
+        loadProducts().then(stored => {
+          if (stored && stored.length > 0) setProducts(stored);
+        });
       }
-      setIsLoaded(true);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'products');
       setIsLoaded(true);
     });
 
-    return () => unsubscribe();
-  }, []);
+    const unsubscribeLogo = subscribeToLogo((logo) => {
+      setCustomLogo(logo);
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeLogo();
+    };
+  }, [isAuthReady, user]);
 
   const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
     try {
+      const provider = new GoogleAuthProvider();
+      // Ensure the popup is triggered by a direct user action
       await signInWithPopup(auth, provider);
-      showToast('Sesión iniciada correctamente');
-    } catch (error) {
-      console.error('Login error:', error);
-      showToast('Error al iniciar sesión');
+    } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') {
+        showToast("Inicio de sesión cancelado por el usuario");
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // Ignore this error as it happens when multiple login attempts are made
+      } else {
+        console.error("Login error:", error);
+        showToast("Error al iniciar sesión. Por favor, inténtalo de nuevo.");
+      }
     }
   };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      showToast('Sesión cerrada');
+      setProducts([]);
+      setCustomLogo(null);
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error("Logout error:", error);
+    }
+  };
+
+  const handleLogoUpdate = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const base64 = await fileToBase64(file);
+      await saveLogo(base64);
+      showToast("Logo actualizado correctamente");
+    } catch (error) {
+      showToast("Error al actualizar el logo");
     }
   };
 
@@ -227,45 +186,45 @@ export default function App() {
 
   const handleDeleteProduct = useCallback(async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'products', id));
+      await deleteProduct(id);
       showToast('Producto eliminado');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `products/${id}`);
-      showToast('Error al eliminar: Permisos insuficientes');
+      showToast('Error al eliminar producto');
     }
   }, []);
 
   const handleToggleLocal = useCallback(async (id: string) => {
     const product = products.find(p => p.id === id);
-    if (!product) return;
-    try {
-      await setDoc(doc(db, 'products', id), { ...product, isLocal: !product.isLocal });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      showToast('Error al actualizar: Permisos insuficientes');
+    if (product) {
+      try {
+        await saveProduct({ ...product, isLocal: !product.isLocal });
+      } catch (error) {
+        showToast('Error al actualizar producto');
+      }
     }
   }, [products]);
 
   const handleToggleSeasonal = useCallback(async (id: string) => {
     const product = products.find(p => p.id === id);
-    if (!product) return;
-    try {
-      await setDoc(doc(db, 'products', id), { ...product, isSeasonal: !product.isSeasonal });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      showToast('Error al actualizar: Permisos insuficientes');
+    if (product) {
+      try {
+        await saveProduct({ ...product, isSeasonal: !product.isSeasonal });
+      } catch (error) {
+        showToast('Error al actualizar producto');
+      }
     }
   }, [products]);
 
   const handleUpdateProductCategory = useCallback(async (id: string, newCategory: string) => {
     const product = products.find(p => p.id === id);
-    if (!product) return;
-    try {
-      await setDoc(doc(db, 'products', id), { ...product, category: newCategory });
-      showToast('Categoría actualizada');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      showToast('Error al actualizar: Permisos insuficientes');
+    if (product) {
+      try {
+        await saveProduct({ ...product, category: newCategory });
+        setToastMessage('Categoría actualizada');
+        setTimeout(() => setToastMessage(null), 2000);
+      } catch (error) {
+        showToast('Error al actualizar categoría');
+      }
     }
   }, [products]);
 
@@ -279,42 +238,53 @@ export default function App() {
     setDragOverCategory(null);
   };
 
-  const handleDrop = (e: React.DragEvent, categoryId: string) => {
+  const handleDrop = async (e: React.DragEvent, categoryId: string) => {
     e.preventDefault();
     setDragOverCategory(null);
     const productId = e.dataTransfer.getData('productId');
     if (productId) {
-      handleUpdateProductCategory(productId, categoryId);
+      const product = products.find(p => p.id === productId);
+      if (product && product.category === categoryId) {
+        return; // Do nothing if it's already in this category
+      }
+      
+      if (product) {
+        try {
+          await saveProduct({ ...product, category: categoryId });
+          setToastMessage('Producto movido de categoría');
+          setTimeout(() => setToastMessage(null), 2000);
+        } catch (error) {
+          showToast('Error al mover producto');
+        }
+      }
     }
   };
 
   const handleRemoveDuplicates = async () => {
-    const seen = new Set();
-    const duplicates = products.filter(p => {
+    const unique: Product[] = [];
+    const seen = new Set<string>();
+    const toDelete: string[] = [];
+    
+    for (let i = products.length - 1; i >= 0; i--) {
+      const p = products[i];
       const key = p.name.toLowerCase().trim();
-      if (seen.has(key)) return true;
-      seen.add(key);
-      return false;
-    });
-
-    if (duplicates.length === 0) {
-      showToast('No se encontraron duplicados');
-      return;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.unshift(p);
+      } else {
+        toDelete.push(p.id);
+      }
     }
-
-    if (!window.confirm(`Se eliminarán ${duplicates.length} duplicados. ¿Continuar?`)) return;
-
-    const batch = writeBatch(db);
-    duplicates.forEach(p => {
-      batch.delete(doc(db, 'products', p.id));
-    });
-
-    try {
-      await batch.commit();
-      showToast(`${duplicates.length} duplicados eliminados`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'products');
-      showToast('Error: Permisos insuficientes');
+    
+    if (toDelete.length > 0) {
+      try {
+        await Promise.all(toDelete.map(id => deleteProduct(id)));
+        showToast(`Se han eliminado ${toDelete.length} productos repetidos`);
+      } catch (error) {
+        showToast('Error al eliminar duplicados');
+      }
+    } else {
+      showToast(`No se encontraron productos repetidos`);
     }
   };
 
@@ -330,20 +300,21 @@ export default function App() {
     showToast('Copia de seguridad descargada');
   };
 
-  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const importedProducts = JSON.parse(event.target?.result as string);
         if (Array.isArray(importedProducts)) {
-          const batch = writeBatch(db);
-          importedProducts.forEach(p => {
-            batch.set(doc(db, 'products', p.id), p);
+          setProducts(prev => {
+            // Merge with existing, avoiding duplicates by ID
+            const existingIds = new Set(prev.map(p => p.id));
+            const newOnes = importedProducts.filter(p => !existingIds.has(p.id));
+            return [...prev, ...newOnes];
           });
-          await batch.commit();
           showToast(`Importados ${importedProducts.length} productos`);
         }
       } catch (err) {
@@ -353,101 +324,122 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleRestoreDefaults = async () => {
+  const handleRestoreDefaults = () => {
     if (window.confirm('¿Estás seguro de que quieres restaurar los productos por defecto? Esto no borrará tus productos actuales, solo añadirá los básicos si faltan.')) {
-      const batch = writeBatch(db);
-      PRODUCTS.forEach(product => {
-        const docRef = doc(db, 'products', product.id);
-        batch.set(docRef, product);
+      import('./constants').then(async ({ PRODUCTS: defaultProducts }) => {
+        const existingNames = new Set(products.map(p => p.name.toLowerCase().trim()));
+        const toAdd = defaultProducts.filter(p => !existingNames.has(p.name.toLowerCase().trim()));
+        if (toAdd.length === 0) {
+          showToast('Ya tienes todos los productos básicos');
+          return;
+        }
+        try {
+          await saveProducts(toAdd);
+          showToast(`Añadidos ${toAdd.length} productos básicos`);
+        } catch (error) {
+          showToast('Error al restaurar básicos');
+        }
       });
-      
-      try {
-        await batch.commit();
-        showToast('Productos básicos restaurados');
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, 'products');
-        showToast('Error: Permisos insuficientes');
-      }
     }
   };
 
-  const handleClearAll = async () => {
-    if (!window.confirm('¿BORRAR TODO EL CATÁLOGO? Esta acción no se puede deshacer.')) return;
-    
-    const batch = writeBatch(db);
-    products.forEach(p => {
-      batch.delete(doc(db, 'products', p.id));
-    });
-
+  const handleAddManualProduct = async (newProduct: Product) => {
     try {
-      await batch.commit();
-      showToast('Catálogo vaciado');
+      await saveProduct(newProduct);
+      setIsAddingProduct(false);
+      showToast('Producto añadido correctamente');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'products');
-      showToast('Error: Permisos insuficientes');
+      showToast('Error al añadir producto');
     }
-  };
-
-  const handleAddManualProduct = (newProduct: Product) => {
-    setDoc(doc(db, 'products', newProduct.id), newProduct)
-      .then(() => {
-        showToast('Producto añadido correctamente');
-        setIsAddingProduct(false);
-      })
-      .catch(error => {
-        handleFirestoreError(error, OperationType.WRITE, `products/${newProduct.id}`);
-        showToast('Error: Permisos insuficientes');
-      });
   };
 
   const handleImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    if (!files || files.length === 0) return;
+    if (!files) return;
 
-    setToastMessage(`Procesando ${files.length} imágenes...`);
-
-    const newProductsPromises: Promise<Product>[] = Array.from(files as Iterable<File>).map(async (file: File): Promise<Product> => {
-      const base64Image = await fileToBase64(file);
+    const newProductsPromises: Promise<Product>[] = Array.from(files as Iterable<File>).map(async (file: File, index: number): Promise<Product> => {
       const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
       
+      // Extract code from the beginning of the filename (e.g., "123-tomate" -> "123")
       const codeMatch = nameWithoutExt.match(/^(\d+)/);
       const code = codeMatch ? codeMatch[1] : '';
       
+      // Remove the code from the name and clean up leading hyphens/underscores/spaces
       let cleanName = nameWithoutExt;
       if (code) {
         cleanName = cleanName.substring(code.length);
       }
       cleanName = cleanName.replace(/^[-_\s]+/, '').replace(/[-_]/g, ' ').trim();
       
+      // Fallback if name is empty
       if (!cleanName) {
         cleanName = 'PRODUCTO';
       }
 
+      // Determine if local (contains 'mallorca')
       const isLocal = cleanName.toLowerCase().includes('mallorca');
 
+      // Determine category based on name
       let category = 'otros';
       const nameLower = cleanName.toLowerCase();
       
       if (nameLower.includes('zumo') || nameLower.includes('jugo') || nameLower.includes('licuado') || nameLower.includes('batido')) {
-        category = 'zumos-naturales';
+        if (nameLower.includes('batido') || nameLower.includes('smoothie')) {
+          category = 'batidos';
+        } else if (nameLower.includes('licuado')) {
+          category = 'licuados';
+        } else if (nameLower.includes('natural')) {
+          category = 'zumos-naturales';
+        } else {
+          category = 'zumos-naturales';
+        }
       } else if (nameLower.includes('patata') || nameLower.includes('papa')) {
         category = 'patatas';
-      } else if (nameLower.includes('cebolla') || nameLower.includes('ajo')) {
+      } else if (nameLower.includes('cebolla') || nameLower.includes('ajo') || nameLower.includes('puerro') || nameLower.includes('cebolleta') || nameLower.includes('chalota')) {
         category = 'cebollas';
-      } else if (nameLower.includes('germinado')) {
+      } else if (nameLower.includes('germinado') || nameLower.includes('brote')) {
         category = 'germinados';
-      } else if (nameLower.includes('lechuga')) {
+      } else if (nameLower.includes('lechuga') || nameLower.includes('espinaca') || nameLower.includes('acelga') || nameLower.includes('canonigo') || nameLower.includes('canónigo') || nameLower.includes('rucula') || nameLower.includes('rúcula') || nameLower.includes('berro') || nameLower.includes('endivia') || nameLower.includes('escarola')) {
         category = 'lechugas';
-      } else if (nameLower.includes('hierba')) {
+      } else if (nameLower.includes('hierba') || nameLower.includes('perejil') || nameLower.includes('cilantro') || nameLower.includes('albahaca') || nameLower.includes('menta') || nameLower.includes('romero') || nameLower.includes('tomillo') || nameLower.includes('cebollino') || nameLower.includes('eneldo') || nameLower.includes('oregano') || nameLower.includes('orégano') || nameLower.includes('laurel')) {
         category = 'hierbas';
-      } else if (nameLower.includes('manzana') || nameLower.includes('pera') || nameLower.includes('naranja')) {
+      } else if (nameLower.includes('manzana') || nameLower.includes('pera') || nameLower.includes('naranja') || nameLower.includes('limon') || nameLower.includes('limón') || nameLower.includes('platano') || nameLower.includes('plátano') || nameLower.includes('fresa') || nameLower.includes('uva') || nameLower.includes('melon') || nameLower.includes('melón') || nameLower.includes('sandia') || nameLower.includes('sandía') || nameLower.includes('melocoton') || nameLower.includes('melocotón') || nameLower.includes('cereza') || nameLower.includes('ciruela') || nameLower.includes('kiwi') || nameLower.includes('mango') || nameLower.includes('aguacate') || nameLower.includes('mandarina') || nameLower.includes('pomelo') || nameLower.includes('frambuesa') || nameLower.includes('arandano') || nameLower.includes('arándano')) {
         category = 'frutas';
-      } else if (nameLower.includes('tomate') || nameLower.includes('pimiento')) {
+      } else if (nameLower.includes('tomate') || nameLower.includes('pimiento') || nameLower.includes('pepino') || nameLower.includes('calabacin') || nameLower.includes('calabacín') || nameLower.includes('berenjena') || nameLower.includes('calabaza') || nameLower.includes('brocoli') || nameLower.includes('brócoli') || nameLower.includes('coliflor') || nameLower.includes('col') || nameLower.includes('alcachofa') || nameLower.includes('esparrago') || nameLower.includes('espárrago') || nameLower.includes('judia') || nameLower.includes('judía') || nameLower.includes('guisante') || nameLower.includes('haba')) {
         category = 'hortalizas';
+      } else if (nameLower.includes('seta') || nameLower.includes('champinon') || nameLower.includes('champiñón') || nameLower.includes('portobello') || nameLower.includes('shiitake') || nameLower.includes('boletus') || nameLower.includes('trufa') || nameLower.includes('niscalo') || nameLower.includes('níscalo') || nameLower.includes('girgola') || nameLower.includes('gírgola')) {
+        category = 'setas';
+      } else if (nameLower.includes('zanahoria') || nameLower.includes('rabano') || nameLower.includes('rábano') || nameLower.includes('remolacha') || nameLower.includes('boniato') || nameLower.includes('batata') || nameLower.includes('yuca') || nameLower.includes('jengibre') || nameLower.includes('nabo') || nameLower.includes('chirivia') || nameLower.includes('chirivía') || nameLower.includes('apio')) {
+        category = 'raices';
       }
 
-      const product: Product = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      // Determine if seasonal (March in Mallorca) - Exclude juices by default
+      const seasonalKeywords = [
+        'alcachofa', 'guisante', 'haba', 'esparrago', 'espárrago', 'acelga', 'espinaca', 
+        'col', 'coliflor', 'brocoli', 'brócoli', 'puerro', 'zanahoria', 'rabano', 'rábano', 
+        'lechuga', 'naranja', 'limon', 'limón', 'pomelo', 'mandarina', 'fresa', 'freson', 'fresón'
+      ];
+      const isSeasonal = !category.includes('zumo') && !category.includes('batido') && !category.includes('licuado') && 
+                         seasonalKeywords.some(keyword => cleanName.toLowerCase().includes(keyword));
+
+      // Extract size if present (e.g. 250ml, 500ml, 1L)
+      let size = 0;
+      const sizeMatch = nameLower.match(/(\d+)\s*(ml|l)/);
+      if (sizeMatch) {
+        const value = parseInt(sizeMatch[1], 10);
+        const unit = sizeMatch[2];
+        size = unit === 'l' ? value * 1000 : value;
+      }
+
+      // Ensure ID is always unique even if multiple files contain the same number
+      const baseId = code || 'prod';
+      const uniqueSuffix = Math.random().toString(36).substring(2, 9);
+      const id = `${baseId}-${uniqueSuffix}-${index}`;
+      
+      const base64Image = await fileToBase64(file);
+      
+      return {
+        id,
         code,
         name: cleanName.toUpperCase(),
         category,
@@ -456,29 +448,39 @@ export default function App() {
         rating: 5.0,
         description: 'Producto añadido desde imagen.',
         isLocal,
-        isSeasonal: true,
+        isSeasonal,
+        size,
       };
-
-      return product;
     });
 
     try {
       const results = await Promise.allSettled(newProductsPromises);
+      
       const newProducts = results
         .filter((result): result is PromiseFulfilledResult<Product> => result.status === 'fulfilled')
         .map(result => result.value);
 
+      const failedCount = results.length - newProducts.length;
+
       if (newProducts.length > 0) {
-        const batch = writeBatch(db);
-        newProducts.forEach(p => {
-          batch.set(doc(db, 'products', p.id), p);
-        });
-        await batch.commit();
-        showToast(`¡Éxito! ${newProducts.length} productos subidos`);
+        try {
+          await saveProducts(newProducts);
+          if (failedCount > 0) {
+            setToastMessage(`¡Éxito! ${newProducts.length} subidos. ${failedCount} fallaron (formato no soportado).`);
+          } else {
+            setToastMessage(`¡Éxito! ${newProducts.length} productos creados correctamente`);
+          }
+        } catch (error) {
+          setToastMessage("Error al guardar productos en la nube");
+        }
+      } else {
+        setToastMessage("Error: Ninguna imagen pudo ser procesada (formato no soportado).");
       }
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (error) {
       console.error("Error uploading images:", error);
-      showToast("Error al procesar las imágenes");
+      setToastMessage("Error al procesar las imágenes");
+      setTimeout(() => setToastMessage(null), 3000);
     }
 
     if (fileInputRef.current) {
@@ -508,6 +510,10 @@ export default function App() {
       if (sortMode === 'az') return a.name.localeCompare(b.name);
       if (sortMode === 'za') return b.name.localeCompare(a.name);
       if (sortMode === 'size') return (a.size || 0) - (b.size || 0);
+      // 'newest' assumes newer items are added to the beginning of the array or we can use ID if it's timestamp based.
+      // For now, if 'newest', we can just reverse the default order or assume the original array is newest first.
+      // Since we unshift in loadProducts, the original array is newest first.
+      // We can find their index in the original `products` array to maintain 'newest' order.
       return products.indexOf(a) - products.indexOf(b);
     });
 
@@ -524,12 +530,41 @@ export default function App() {
     }
   }, [products, selectedProduct]);
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
+        <div className="text-center mb-12">
+           <div className="w-24 h-24 bg-emerald-500 rounded-3xl flex items-center justify-center text-white shadow-lg mx-auto mb-6">
+             <Leaf size={48} />
+           </div>
+           <h1 className="text-4xl font-bold tracking-tight text-slate-900 mb-2">Bonany</h1>
+           <p className="text-lg text-slate-500 mb-8">Inicia sesión para acceder al catálogo</p>
+           <button 
+             onClick={handleLogin}
+             className="bg-white px-8 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all border border-black/5 flex items-center gap-3 font-bold text-slate-700 mx-auto"
+           >
+             <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+             Continuar con Google
+           </button>
+        </div>
+      </div>
+    );
+  }
+
   if (appSection === 'home') {
     return (
       <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
         <div className="text-center mb-12">
            <img 
-             src="/LOGO.png" 
+             src={customLogo || "/LOGO.png"} 
              alt="BonAny Logo" 
              className="h-24 mx-auto mb-6 object-contain"
              onError={(e) => {
@@ -617,7 +652,7 @@ export default function App() {
         <div className="p-6 md:p-8 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer select-none" onClick={handleLogoClick}>
             <img 
-              src="/LOGO.png" 
+              src={customLogo || "/LOGO.png"} 
               alt="BonAny Logo" 
               className="h-10 object-contain"
               onError={(e) => {
@@ -696,7 +731,7 @@ export default function App() {
             <div>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-3">Frutas y Verduras</p>
               <nav className="space-y-0.5">
-                {CATEGORIES.filter(c => c.section === 'produce' || c.section === 'other').map((category) => (
+                {CATEGORIES.filter(c => c.section === 'produce').map((category) => (
                   <button
                     key={category.id}
                     onClick={() => {
@@ -715,7 +750,7 @@ export default function App() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-lg">{category.icon}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${selectedCategory === category.id ? 'bg-white' : dragOverCategory === category.id ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                       <span>{category.name}</span>
                     </div>
                     {selectedCategory === category.id && <ChevronRight size={14} />}
@@ -727,7 +762,7 @@ export default function App() {
 
           {appSection === 'juices' && (
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-3">Zumos y Bebidas</p>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-3">Zumos</p>
               <nav className="space-y-0.5">
                 {CATEGORIES.filter(c => c.section === 'juices').map((category) => (
                   <button
@@ -741,14 +776,14 @@ export default function App() {
                     onDrop={(e) => handleDrop(e, category.id)}
                     className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-[15px] font-medium transition-all ios-active ${
                       selectedCategory === category.id 
-                        ? 'bg-orange-500 text-white shadow-sm' 
+                        ? 'bg-emerald-500 text-white shadow-sm' 
                         : dragOverCategory === category.id
-                        ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500 ring-inset'
+                        ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500 ring-inset'
                         : 'text-slate-600 hover:bg-black/5'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-lg">{category.icon}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${selectedCategory === category.id ? 'bg-white' : dragOverCategory === category.id ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                       <span>{category.name}</span>
                     </div>
                     {selectedCategory === category.id && <ChevronRight size={14} />}
@@ -757,217 +792,321 @@ export default function App() {
               </nav>
             </div>
           )}
+
+          {appSection === 'produce' && (
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-3">Otros</p>
+              <nav className="space-y-0.5">
+                {CATEGORIES.filter(c => c.section === 'other').map((category) => (
+                  <button
+                    key={category.id}
+                    onClick={() => {
+                      setSelectedCategory(category.id);
+                      if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                    }}
+                    onDragOver={(e) => handleDragOver(e, category.id)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, category.id)}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-[15px] font-medium transition-all ios-active ${
+                      selectedCategory === category.id 
+                        ? 'bg-emerald-500 text-white shadow-sm' 
+                        : dragOverCategory === category.id
+                        ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500 ring-inset'
+                        : 'text-slate-600 hover:bg-black/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`w-1.5 h-1.5 rounded-full ${selectedCategory === category.id ? 'bg-white' : dragOverCategory === category.id ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                      <span>{category.name}</span>
+                    </div>
+                    {selectedCategory === category.id && <ChevronRight size={14} />}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          )}
+
+          <div>
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-3">Filtros</p>
+            <div className="space-y-1">
+              <button
+                onClick={() => setFilterLocal(!filterLocal)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[15px] font-medium transition-all ios-active ${
+                  filterLocal ? 'bg-white text-emerald-600 shadow-sm border border-black/5' : 'bg-transparent text-slate-600 hover:bg-black/5'
+                }`}
+              >
+                <MapPin size={18} className={filterLocal ? 'text-emerald-500' : 'text-slate-400'} />
+                <span>Local / Mallorca</span>
+              </button>
+              <button
+                onClick={() => setFilterSeasonal(!filterSeasonal)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[15px] font-medium transition-all ios-active ${
+                  filterSeasonal ? 'bg-white text-amber-600 shadow-sm border border-black/5' : 'bg-transparent text-slate-600 hover:bg-black/5'
+                }`}
+              >
+                <Calendar size={18} className={filterSeasonal ? 'text-amber-500' : 'text-slate-400'} />
+                <span>Temporada</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-6 border-t border-black/5 bg-black/[0.02]">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-            <span>v2.5.0</span>
-            <span className="text-emerald-500 flex items-center gap-1">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-              Online
-            </span>
+        <div className="p-6 space-y-4">
+          <div className="p-4 bg-black/5 rounded-2xl">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usuario</p>
+            <p className="text-sm font-bold text-black truncate">{user?.displayName || user?.email}</p>
+            <button 
+              onClick={handleLogout}
+              className="text-[10px] text-rose-500 font-bold uppercase mt-2 hover:underline"
+            >
+              Cerrar Sesión
+            </button>
+          </div>
+          <div className="p-4 bg-black/5 rounded-2xl">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Comercial</p>
+            <p className="text-sm font-bold text-black">Bonany Mallorca</p>
           </div>
         </div>
       </motion.aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-white lg:rounded-tl-[40px] lg:shadow-2xl lg:my-2 lg:mr-2 overflow-hidden relative">
-        {/* Top Navigation Bar */}
-        <header className="h-20 border-b border-black/5 flex items-center justify-between px-6 md:px-10 bg-white/80 backdrop-blur-xl sticky top-0 z-20">
-          <div className="flex items-center gap-4 flex-1">
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#f2f2f7]">
+        {/* Top Navigation Bar - iOS Style */}
+        <header className="h-16 md:h-20 ios-glass border-b border-black/5 flex items-center justify-between px-4 md:px-8 flex-shrink-0 sticky top-0 z-20">
+          <div className="flex items-center gap-4 md:gap-6 flex-1">
             <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className={`p-2.5 text-slate-500 hover:text-black hover:bg-black/5 rounded-xl transition-all ios-active ${isSidebarOpen ? 'lg:hidden' : ''}`}
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-all ios-active"
             >
-              <Menu size={22} />
+              {isSidebarOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
-            
-            <div className="relative flex-1 max-w-md group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={18} />
+
+            <div className="relative w-full max-w-md group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-600 transition-colors" size={18} />
               <input
                 type="text"
-                placeholder="Buscar por nombre o código..."
+                placeholder="Buscar..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#f2f2f7] border-none rounded-2xl py-3 pl-12 pr-4 text-[15px] focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none placeholder:text-slate-400"
+                className="w-full pl-11 pr-4 py-2.5 bg-black/5 border-none rounded-2xl text-[15px] focus:bg-white focus:ring-0 outline-none transition-all"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-3 ml-4">
-            {/* View Mode Toggle */}
-            <div className="hidden sm:flex bg-[#f2f2f7] p-1 rounded-xl">
-              <button 
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <GridIcon size={18} />
-              </button>
-              <button 
-                onClick={() => setViewMode('list')}
-                className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <ListIcon size={18} />
-              </button>
-            </div>
-
-            {/* Sort Menu */}
-            <div className="relative group hidden md:block">
-              <button className="flex items-center gap-2 px-4 py-2.5 bg-[#f2f2f7] hover:bg-[#e5e5ea] rounded-xl text-sm font-semibold text-slate-700 transition-all ios-active">
-                {sortMode === 'az' && <ArrowDownAZ size={18} />}
-                {sortMode === 'za' && <ArrowUpZA size={18} />}
-                {sortMode === 'size' && <Ruler size={18} />}
-                {sortMode === 'newest' && <Clock size={18} />}
-                <span>Ordenar</span>
-              </button>
-              <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-black/5 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                <button onClick={() => setSortMode('az')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${sortMode === 'az' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-600 hover:bg-black/5'}`}>
-                  <ArrowDownAZ size={16} /> A - Z
-                </button>
-                <button onClick={() => setSortMode('za')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${sortMode === 'za' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-600 hover:bg-black/5'}`}>
-                  <ArrowUpZA size={16} /> Z - A
-                </button>
-                <button onClick={() => setSortMode('size')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${sortMode === 'size' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-600 hover:bg-black/5'}`}>
-                  <Ruler size={16} /> Por Tamaño
-                </button>
-                <button onClick={() => setSortMode('newest')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${sortMode === 'newest' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-600 hover:bg-black/5'}`}>
-                  <Clock size={16} /> Más recientes
-                </button>
-              </div>
-            </div>
-
-            {/* Filter Pills */}
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4 ml-4">
+            {isAdminMode && (
               <button
-                onClick={() => setFilterLocal(!filterLocal)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ios-active ${
-                  filterLocal 
-                    ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' 
-                    : 'bg-[#f2f2f7] text-slate-600 hover:bg-[#e5e5ea]'
-                }`}
+                onClick={handleRemoveDuplicates}
+                className="hidden sm:flex items-center gap-2 px-3 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl text-xs font-bold transition-colors"
+                title="Eliminar productos con el mismo nombre"
               >
-                <MapPin size={16} />
-                <span className="hidden sm:inline">Mallorca</span>
+                <Trash2 size={14} />
+                <span>Limpiar Duplicados</span>
               </button>
-              <button
-                onClick={() => setFilterSeasonal(!filterSeasonal)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ios-active ${
-                  filterSeasonal 
-                    ? 'bg-orange-500 text-white shadow-md shadow-orange-200' 
-                    : 'bg-[#f2f2f7] text-slate-600 hover:bg-[#e5e5ea]'
-                }`}
-              >
-                <Calendar size={16} />
-                <span className="hidden sm:inline">Temporada</span>
-              </button>
+            )}
+            <div className="text-right hidden sm:block">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Estado</p>
+              <p className="text-xs font-bold text-emerald-600">{isAdminMode ? 'Modo Edición' : 'Actualizado'}</p>
+            </div>
+            <div 
+              className={`w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm border border-black/5 cursor-pointer transition-colors ${isAdminMode ? 'text-white bg-emerald-500' : 'text-emerald-500'}`}
+              onDoubleClick={() => setIsAdminMode(prev => !prev)}
+              title="Doble clic para modo edición"
+            >
+              <Leaf size={20} />
             </div>
           </div>
         </header>
 
-        {/* Products Area */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-10 no-scrollbar bg-white">
-          <div className="max-w-[1600px] mx-auto">
-            {/* Section Header */}
-            <div className="flex items-end justify-between mb-8">
+        {/* Scrollable Grid Area */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-10 no-scrollbar">
+          <div className="max-w-7xl mx-auto">
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
               <div>
-                <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900">
-                  {selectedCategory 
-                    ? CATEGORIES.find(c => c.id === selectedCategory)?.name 
-                    : appSection === 'produce' ? 'Frutas y Verduras' : 'Zumos y Bebidas'}
+                <h2 className="text-3xl font-bold tracking-tight text-black">
+                  {selectedCategory ? CATEGORIES.find(c => c.id === selectedCategory)?.name : 'Catálogo'}
                 </h2>
-                <p className="text-slate-400 font-medium mt-1">
-                  {filteredProducts.length} {filteredProducts.length === 1 ? 'producto encontrado' : 'productos encontrados'}
+                <p className="text-[15px] text-slate-500 mt-1 font-medium">
+                  {filteredProducts.length} productos profesionales
+                  {isAdminMode && ' • Arrastra para recategorizar'}
                 </p>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                {/* Sort Toggle */}
+                <div className="flex bg-white rounded-xl shadow-sm border border-black/5 p-1">
+                  <button
+                    onClick={() => setSortMode('az')}
+                    className={`p-2 rounded-lg transition-colors ${sortMode === 'az' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Ordenar A-Z"
+                  >
+                    <ArrowDownAZ size={18} />
+                  </button>
+                  <button
+                    onClick={() => setSortMode('za')}
+                    className={`p-2 rounded-lg transition-colors ${sortMode === 'za' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Ordenar Z-A"
+                  >
+                    <ArrowUpZA size={18} />
+                  </button>
+                  <button
+                    onClick={() => setSortMode('newest')}
+                    className={`p-2 rounded-lg transition-colors ${sortMode === 'newest' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Más recientes"
+                  >
+                    <Clock size={18} />
+                  </button>
+                  {appSection === 'juices' && (
+                    <button
+                      onClick={() => setSortMode('size')}
+                      className={`p-2 rounded-lg transition-colors ${sortMode === 'size' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                      title="Ordenar por tamaño"
+                    >
+                      <Ruler size={18} />
+                    </button>
+                  )}
+                </div>
+
+                {/* View Mode Segmented Control */}
+                <div className="flex bg-[#f2f2f7] p-1 rounded-xl relative w-24">
+                  <motion.div
+                    layoutId="viewModeBg"
+                    className="absolute inset-y-1 bg-white rounded-lg shadow-sm"
+                    initial={false}
+                    animate={{
+                      left: viewMode === 'grid' ? 4 : '50%',
+                      width: 'calc(50% - 4px)'
+                    }}
+                    transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
+                  />
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Vista Cuadrícula"
+                  >
+                    <GridIcon size={18} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Vista Lista"
+                  >
+                    <ListIcon size={18} />
+                  </button>
+                </div>
+
+                {(searchQuery || filterLocal || filterSeasonal || selectedCategory) && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery('');
+                      setSelectedCategory(null);
+                      setFilterLocal(false);
+                      setFilterSeasonal(false);
+                    }}
+                    className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl transition-colors"
+                  >
+                    Ver todos
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Products Grid/List */}
-            {!isLoaded ? (
-              <div className="flex flex-col items-center justify-center h-64 gap-4">
-                <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
-                <p className="text-slate-400 font-medium animate-pulse">Cargando catálogo...</p>
-              </div>
-            ) : filteredProducts.length > 0 ? (
-              <motion.div 
-                layout
-                className={viewMode === 'grid' 
-                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 md:gap-6"
-                  : "flex flex-col gap-3"
-                }
-              >
-                <AnimatePresence mode='popLayout'>
+            <AnimatePresence mode="wait">
+              {filteredProducts.length > 0 ? (
+                <motion.div 
+                  key={viewMode}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className={viewMode === 'grid' 
+                    ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 md:gap-6"
+                    : "flex flex-col gap-3"
+                  }
+                >
                   {filteredProducts.map((product) => (
-                    <ProductCard
-                      key={product.id}
-                      product={product}
-                      viewMode={viewMode}
-                      isAdmin={isAdminMode}
+                    <ProductCard 
+                      key={product.id} 
+                      product={product} 
+                      onClick={setSelectedProduct} 
+                      isAdminMode={isAdminMode}
                       onDelete={handleDeleteProduct}
                       onToggleLocal={handleToggleLocal}
                       onToggleSeasonal={handleToggleSeasonal}
-                      onClick={() => setSelectedProduct(product)}
+                      onUpdateCategory={handleUpdateProductCategory}
+                      viewMode={viewMode}
                     />
                   ))}
-                </AnimatePresence>
-              </motion.div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-96 text-center">
-                <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-6">
-                  <Search size={40} />
+                </motion.div>
+              ) : (
+                <div className="py-20 text-center bg-white/50 rounded-3xl border border-dashed border-black/10">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 shadow-sm">
+                    {products.length === 0 ? <LayoutGrid size={32} /> : <Search size={32} />}
+                  </div>
+                  <h3 className="text-lg font-bold text-black">
+                    {products.length === 0 ? 'Catálogo vacío' : 'Sin resultados'}
+                  </h3>
+                  <p className="text-sm text-slate-400 mt-1 max-w-sm mx-auto">
+                    {products.length === 0 
+                      ? 'Haz 5 clics rápidos en el logo de Bonany (arriba a la izquierda) para subir tus imágenes y crear productos.' 
+                      : 'Intenta con otros filtros o términos de búsqueda.'}
+                  </p>
+                  {products.length > 0 && (
+                    <button 
+                      onClick={() => {setSearchQuery(''); setSelectedCategory(null); setFilterLocal(false); setFilterSeasonal(false);}}
+                      className="mt-6 px-8 py-3 bg-emerald-500 text-white rounded-2xl font-bold text-sm ios-active shadow-md shadow-emerald-500/20"
+                    >
+                      Limpiar filtros
+                    </button>
+                  )}
                 </div>
-                <h3 className="text-xl font-bold text-slate-900 mb-2">No hay resultados</h3>
-                <p className="text-slate-500 max-w-xs">No hemos encontrado ningún producto que coincida con tu búsqueda o filtros.</p>
-                <button 
-                  onClick={() => {
-                    setSearchQuery('');
-                    setFilterLocal(false);
-                    setFilterSeasonal(false);
-                    setSelectedCategory(null);
-                  }}
-                  className="mt-6 text-emerald-600 font-bold hover:underline"
-                >
-                  Limpiar todos los filtros
-                </button>
-              </div>
-            )}
+              )}
+            </AnimatePresence>
           </div>
         </div>
-
-        {/* Admin Panel Overlay */}
-        {isAdminPanelOpen && (
-          <AdminPanel
-            user={user}
-            onLogin={handleLogin}
-            onLogout={handleLogout}
-            onExport={handleExportData}
-            onImport={handleImportData}
-            onRestoreDefaults={handleRestoreDefaults}
-            onRemoveDuplicates={handleRemoveDuplicates}
-            onClearAll={handleClearAll}
-            onAddManual={() => setIsAddingProduct(true)}
-            onClose={() => setIsAdminPanelOpen(false)}
-            setProducts={setProducts}
-            showToast={showToast}
-          />
-        )}
-
-        {/* Modals */}
-        <AnimatePresence>
-          {selectedProduct && (
-            <ProductModal
-              product={selectedProduct}
-              onClose={() => setSelectedProduct(null)}
-            />
-          )}
-          {isAddingProduct && (
-            <ProductForm
-              onClose={() => setIsAddingProduct(false)}
-              onSubmit={handleAddManualProduct}
-            />
-          )}
-        </AnimatePresence>
       </main>
+
+      <ProductModal 
+        product={selectedProduct} 
+        onClose={() => setSelectedProduct(null)} 
+        isAdminMode={isAdminMode}
+        onUpdateCategory={handleUpdateProductCategory}
+      />
+
+      {isAdminPanelOpen && (
+        <AdminPanel
+          onExport={handleExportData}
+          onImport={handleImportData}
+          onRestoreDefaults={handleRestoreDefaults}
+          onRemoveDuplicates={handleRemoveDuplicates}
+          onAddManual={() => {
+            setIsAdminPanelOpen(false);
+            setIsAddingProduct(true);
+          }}
+          onClose={() => setIsAdminPanelOpen(false)}
+          setProducts={setProducts}
+          showToast={showToast}
+          onUpdateLogo={handleLogoUpdate}
+        />
+      )}
+
+      {isAddingProduct && (
+        <ProductForm
+          onSave={handleAddManualProduct}
+          onCancel={() => setIsAddingProduct(false)}
+        />
+      )}
+
+      {/* Hidden File Input for legacy support */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImageUpload}
+        multiple
+        accept="image/*"
+        className="hidden"
+      />
     </div>
   );
 }

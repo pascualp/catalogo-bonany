@@ -2,59 +2,44 @@
   "entities": {
     "Product": {
       "title": "Product",
-      "description": "A product in the catalog.",
+      "description": "A product in the catalog",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique identifier" },
-        "code": { "type": "string", "description": "Product code" },
-        "name": { "type": "string", "description": "Product name" },
-        "category": { "type": "string", "description": "Category ID" },
-        "image": { "type": "string", "description": "Base64 or URL image" },
-        "price": { "type": "number", "description": "Price" },
-        "rating": { "type": "number", "description": "Rating" },
-        "description": { "type": "string", "description": "Description" },
-        "isLocal": { "type": "boolean", "description": "Is local product" },
-        "isSeasonal": { "type": "boolean", "description": "Is seasonal product" },
-        "size": { "type": "number", "description": "Size in ml/g" }
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "image": { "type": "string" },
+        "format": { "type": "string" },
+        "packaging": { "type": "string" },
+        "useCase": { "type": "string" },
+        "isLocal": { "type": "boolean" },
+        "isSeasonal": { "type": "boolean" },
+        "landscapeImage": { "type": "string" },
+        "price": { "type": "number" },
+        "rating": { "type": "number" },
+        "description": { "type": "string" },
+        "size": { "type": "number" }
       },
-      "required": ["id", "name", "category", "image"]
+      "required": ["id", "name", "category"]
     },
-    "Category": {
-      "title": "Category",
-      "description": "A product category.",
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application settings like the logo",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique identifier" },
-        "name": { "type": "string", "description": "Category name" },
-        "icon": { "type": "string", "description": "Lucide icon name" },
-        "section": { "type": "string", "enum": ["produce", "juices", "other"] }
-      },
-      "required": ["id", "name", "icon", "section"]
-    },
-    "User": {
-      "title": "User",
-      "description": "A user profile.",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string", "description": "User ID" },
-        "email": { "type": "string", "description": "User email" },
-        "role": { "type": "string", "enum": ["admin", "user"] }
-      },
-      "required": ["uid", "email", "role"]
+        "logo": { "type": "string" }
+      }
     }
   },
   "firestore": {
     "/products/{productId}": {
       "schema": "Product",
-      "description": "Collection of products"
+      "description": "Collection of all products"
     },
-    "/categories/{categoryId}": {
-      "schema": "Category",
-      "description": "Collection of categories"
-    },
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "Collection of user profiles"
+    "/settings/global": {
+      "schema": "AppSettings",
+      "description": "Global settings for the application"
     }
   }
 }

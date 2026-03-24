@@ -1,55 +1,162 @@
+import { 
+  collection, 
+  getDocs, 
+  setDoc, 
+  doc, 
+  getDoc, 
+  deleteDoc, 
+  query, 
+  orderBy, 
+  onSnapshot,
+  getDocFromServer
+} from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { Product } from '../types';
 
-const DB_NAME = 'BonanyDB';
-const STORE_NAME = 'products';
-const DB_VERSION = 1;
+const PRODUCTS_COLLECTION = 'products';
+const SETTINGS_COLLECTION = 'settings';
+const GLOBAL_SETTINGS_DOC = 'global';
 
-export const initDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-    };
-  });
-};
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+export const testConnection = async () => {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. ");
+    }
+  }
+}
 
 export const saveProducts = async (products: Product[]): Promise<void> => {
   try {
-    const db = await initDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    
-    // Clear existing and save all
-    store.clear();
-    products.forEach(p => store.put(p));
-    
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    // In Firestore, we usually save individually or in batches.
+    // For simplicity, we'll save each product.
+    const promises = products.map(product => 
+      setDoc(doc(db, PRODUCTS_COLLECTION, product.id), product)
+    );
+    await Promise.all(promises);
   } catch (error) {
-    console.error('Error saving products to DB:', error);
+    handleFirestoreError(error, OperationType.WRITE, PRODUCTS_COLLECTION);
+  }
+};
+
+export const saveProduct = async (product: Product): Promise<void> => {
+  try {
+    await setDoc(doc(db, PRODUCTS_COLLECTION, product.id), product);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${PRODUCTS_COLLECTION}/${product.id}`);
+  }
+};
+
+export const deleteProduct = async (id: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, PRODUCTS_COLLECTION, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${PRODUCTS_COLLECTION}/${id}`);
   }
 };
 
 export const loadProducts = async (): Promise<Product[]> => {
   try {
-    const db = await initDB();
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.getAll();
-    
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result || []);
-      request.onerror = () => reject(request.error);
-    });
+    const q = query(collection(db, PRODUCTS_COLLECTION));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => doc.data() as Product);
   } catch (error) {
-    console.error('Error loading products from DB:', error);
+    handleFirestoreError(error, OperationType.LIST, PRODUCTS_COLLECTION);
     return [];
   }
+};
+
+export const subscribeToProducts = (callback: (products: Product[]) => void) => {
+  const q = query(collection(db, PRODUCTS_COLLECTION));
+  return onSnapshot(q, (snapshot) => {
+    const products = snapshot.docs.map(doc => doc.data() as Product);
+    callback(products);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, PRODUCTS_COLLECTION);
+  });
+};
+
+export const saveLogo = async (logoBase64: string): Promise<void> => {
+  try {
+    await setDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), { logo: logoBase64 }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
+  }
+};
+
+export const loadLogo = async (): Promise<string | null> => {
+  try {
+    const docSnap = await getDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC));
+    if (docSnap.exists()) {
+      return docSnap.data().logo || null;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
+    return null;
+  }
+};
+
+export const subscribeToLogo = (callback: (logo: string | null) => void) => {
+  return onSnapshot(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data().logo || null);
+    } else {
+      callback(null);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
+  });
 };
