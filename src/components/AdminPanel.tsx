@@ -12,6 +12,9 @@ interface AdminPanelProps {
   setProducts: React.Dispatch<React.SetStateAction<any[]>>;
   showToast: (msg: string) => void;
   onUpdateLogo: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isLoggedIn: boolean;
+  isAdmin: boolean;
+  onLogin: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -23,7 +26,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onClose,
   setProducts,
   showToast,
-  onUpdateLogo
+  onUpdateLogo,
+  isLoggedIn,
+  isAdmin,
+  onLogin
 }) => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -46,112 +52,132 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh] no-scrollbar">
-          <div className="grid grid-cols-1 gap-3">
-            <button
-              onClick={() => logoInputRef.current?.click()}
-              className="flex items-center gap-3 p-4 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-2xl transition-all border border-purple-100 group ios-active"
-            >
-              <div className="p-2 bg-purple-500 text-white rounded-xl group-hover:scale-110 transition-transform">
-                <Upload size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold">Cambiar Logo</p>
-                <p className="text-[10px] opacity-70">Sube un nuevo logo para la app</p>
-                <input
-                  type="file"
-                  ref={logoInputRef}
-                  onChange={onUpdateLogo}
-                  accept="image/*"
-                  className="hidden"
-                />
-              </div>
-            </button>
-
-            <button
-              onClick={onAddManual}
-              className="flex items-center gap-3 p-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-2xl transition-all border border-emerald-100 group ios-active"
-            >
-              <div className="p-2 bg-emerald-500 text-white rounded-xl group-hover:scale-110 transition-transform">
-                <Plus size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold">Añadir Manualmente</p>
-                <p className="text-[10px] opacity-70">Crea un producto paso a paso</p>
-              </div>
-            </button>
-
-            <button
-              onClick={onRemoveDuplicates}
-              className="flex items-center gap-3 p-4 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-2xl transition-all border border-blue-100 group ios-active"
-            >
-              <div className="p-2 bg-blue-500 text-white rounded-xl group-hover:scale-110 transition-transform">
-                <Trash2 size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold">Limpiar Duplicados</p>
-                <p className="text-[10px] opacity-70">Elimina productos con el mismo nombre</p>
-              </div>
-            </button>
-
-            <button
-              onClick={onRestoreDefaults}
-              className="flex items-center gap-3 p-4 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-2xl transition-all border border-amber-100 group ios-active"
-            >
-              <div className="p-2 bg-amber-500 text-white rounded-xl group-hover:scale-110 transition-transform">
-                <RefreshCcw size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold">Restaurar Básicos</p>
-                <p className="text-[10px] opacity-70">Añade los productos iniciales</p>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                if (window.confirm('¿Estás seguro de que quieres borrar TODOS los productos? Esta acción no se puede deshacer.')) {
-                  setProducts([]);
-                  showToast('Todos los productos han sido eliminados');
-                }
-              }}
-              className="flex items-center gap-3 p-4 bg-red-50 hover:bg-red-100 text-red-700 rounded-2xl transition-all border border-red-100 group ios-active"
-            >
-              <div className="p-2 bg-red-500 text-white rounded-xl group-hover:scale-110 transition-transform">
-                <Trash2 size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold">Borrar Todo</p>
-                <p className="text-[10px] opacity-70">Elimina permanentemente todos los datos</p>
-              </div>
-            </button>
-          </div>
-
-          <div className="pt-4 border-t border-slate-100">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Copia de Seguridad</p>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={onExport}
-                className="flex flex-col items-center gap-2 p-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-2xl transition-all border border-slate-200 ios-active"
+          {!isLoggedIn ? (
+            <div className="text-center py-8">
+              <p className="text-slate-500 mb-6">Inicia sesión para gestionar el catálogo</p>
+              <button 
+                onClick={onLogin}
+                className="bg-white px-8 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all border border-black/5 flex items-center gap-3 font-bold text-slate-700 mx-auto"
               >
-                <Download size={20} />
-                <span className="text-xs font-bold">Exportar JSON</span>
-              </button>
-
-              <button
-                onClick={() => importInputRef.current?.click()}
-                className="flex flex-col items-center gap-2 p-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-2xl transition-all border border-slate-200 ios-active"
-              >
-                <Upload size={20} />
-                <span className="text-xs font-bold">Importar JSON</span>
-                <input
-                  type="file"
-                  ref={importInputRef}
-                  onChange={onImport}
-                  accept=".json"
-                  className="hidden"
-                />
+                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+                Continuar con Google
               </button>
             </div>
-          </div>
+          ) : !isAdmin ? (
+            <div className="text-center py-8">
+              <p className="text-rose-500 font-bold mb-2">Acceso Denegado</p>
+              <p className="text-slate-500 text-sm">No tienes permisos de administrador.</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={() => logoInputRef.current?.click()}
+                  className="flex items-center gap-3 p-4 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-2xl transition-all border border-purple-100 group ios-active"
+                >
+                  <div className="p-2 bg-purple-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Upload size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Cambiar Logo</p>
+                    <p className="text-[10px] opacity-70">Sube un nuevo logo para la app</p>
+                    <input
+                      type="file"
+                      ref={logoInputRef}
+                      onChange={onUpdateLogo}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </div>
+                </button>
+
+                <button
+                  onClick={onAddManual}
+                  className="flex items-center gap-3 p-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-2xl transition-all border border-emerald-100 group ios-active"
+                >
+                  <div className="p-2 bg-emerald-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Plus size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Añadir Manualmente</p>
+                    <p className="text-[10px] opacity-70">Crea un producto paso a paso</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={onRemoveDuplicates}
+                  className="flex items-center gap-3 p-4 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-2xl transition-all border border-blue-100 group ios-active"
+                >
+                  <div className="p-2 bg-blue-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Trash2 size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Limpiar Duplicados</p>
+                    <p className="text-[10px] opacity-70">Elimina productos con el mismo nombre</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={onRestoreDefaults}
+                  className="flex items-center gap-3 p-4 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-2xl transition-all border border-amber-100 group ios-active"
+                >
+                  <div className="p-2 bg-amber-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <RefreshCcw size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Restaurar Básicos</p>
+                    <p className="text-[10px] opacity-70">Añade los productos iniciales</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (window.confirm('¿Estás seguro de que quieres borrar TODOS los productos? Esta acción no se puede deshacer.')) {
+                      setProducts([]);
+                      showToast('Todos los productos han sido eliminados');
+                    }
+                  }}
+                  className="flex items-center gap-3 p-4 bg-red-50 hover:bg-red-100 text-red-700 rounded-2xl transition-all border border-red-100 group ios-active"
+                >
+                  <div className="p-2 bg-red-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Trash2 size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Borrar Todo</p>
+                    <p className="text-[10px] opacity-70">Elimina permanentemente todos los datos</p>
+                  </div>
+                </button>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Copia de Seguridad</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={onExport}
+                    className="flex flex-col items-center gap-2 p-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-2xl transition-all border border-slate-200 ios-active"
+                  >
+                    <Download size={20} />
+                    <span className="text-xs font-bold">Exportar JSON</span>
+                  </button>
+
+                  <button
+                    onClick={() => importInputRef.current?.click()}
+                    className="flex flex-col items-center gap-2 p-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-2xl transition-all border border-slate-200 ios-active"
+                  >
+                    <Upload size={20} />
+                    <span className="text-xs font-bold">Importar JSON</span>
+                    <input
+                      type="file"
+                      ref={importInputRef}
+                      onChange={onImport}
+                      accept=".json"
+                      className="hidden"
+                    />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="p-4 bg-slate-50 text-center">

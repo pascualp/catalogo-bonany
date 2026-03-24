@@ -12,7 +12,7 @@ import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
 import { CATEGORIES } from './constants';
 import { Product } from './types';
-import { saveProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
+import { saveProducts, saveProduct, deleteProduct, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
 import { auth } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 
@@ -102,7 +102,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthReady || !user) return;
+    if (!isAuthReady) return;
 
     const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
       if (updatedProducts && updatedProducts.length > 0) {
@@ -124,7 +124,9 @@ export default function App() {
       unsubscribeProducts();
       unsubscribeLogo();
     };
-  }, [isAuthReady, user]);
+  }, [isAuthReady]);
+
+  const isAdmin = user?.email === 'fruitesbonany20@gmail.com';
 
   const handleLogin = async () => {
     try {
@@ -146,8 +148,6 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setProducts([]);
-      setCustomLogo(null);
     } catch (error) {
       console.error("Logout error:", error);
     }
@@ -538,27 +538,6 @@ export default function App() {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
-        <div className="text-center mb-12">
-           <div className="w-24 h-24 bg-emerald-500 rounded-3xl flex items-center justify-center text-white shadow-lg mx-auto mb-6">
-             <Leaf size={48} />
-           </div>
-           <h1 className="text-4xl font-bold tracking-tight text-slate-900 mb-2">Bonany</h1>
-           <p className="text-lg text-slate-500 mb-8">Inicia sesión para acceder al catálogo</p>
-           <button 
-             onClick={handleLogin}
-             className="bg-white px-8 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all border border-black/5 flex items-center gap-3 font-bold text-slate-700 mx-auto"
-           >
-             <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-             Continuar con Google
-           </button>
-        </div>
-      </div>
-    );
-  }
-
   if (appSection === 'home') {
     return (
       <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
@@ -853,16 +832,18 @@ export default function App() {
 
         {/* Sidebar Footer */}
         <div className="p-6 space-y-4">
-          <div className="p-4 bg-black/5 rounded-2xl">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usuario</p>
-            <p className="text-sm font-bold text-black truncate">{user?.displayName || user?.email}</p>
-            <button 
-              onClick={handleLogout}
-              className="text-[10px] text-rose-500 font-bold uppercase mt-2 hover:underline"
-            >
-              Cerrar Sesión
-            </button>
-          </div>
+          {user && (
+            <div className="p-4 bg-black/5 rounded-2xl">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usuario</p>
+              <p className="text-sm font-bold text-black truncate">{user?.displayName || user?.email}</p>
+              <button 
+                onClick={handleLogout}
+                className="text-[10px] text-rose-500 font-bold uppercase mt-2 hover:underline"
+              >
+                Cerrar Sesión
+              </button>
+            </div>
+          )}
           <div className="p-4 bg-black/5 rounded-2xl">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Comercial</p>
             <p className="text-sm font-bold text-black">Bonany Mallorca</p>
@@ -1030,7 +1011,7 @@ export default function App() {
                       key={product.id} 
                       product={product} 
                       onClick={setSelectedProduct} 
-                      isAdminMode={isAdminMode}
+                      isAdminMode={isAdminMode && isAdmin}
                       onDelete={handleDeleteProduct}
                       onToggleLocal={handleToggleLocal}
                       onToggleSeasonal={handleToggleSeasonal}
@@ -1070,7 +1051,7 @@ export default function App() {
       <ProductModal 
         product={selectedProduct} 
         onClose={() => setSelectedProduct(null)} 
-        isAdminMode={isAdminMode}
+        isAdminMode={isAdminMode && isAdmin}
         onUpdateCategory={handleUpdateProductCategory}
       />
 
@@ -1088,6 +1069,9 @@ export default function App() {
           setProducts={setProducts}
           showToast={showToast}
           onUpdateLogo={handleLogoUpdate}
+          isLoggedIn={!!user}
+          isAdmin={isAdmin}
+          onLogin={handleLogin}
         />
       )}
 

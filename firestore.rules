@@ -61,13 +61,13 @@ service cloud.firestore {
     // ===============================================================
 
     match /products/{productId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /settings/global {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAdmin() && isValidSettings(request.resource.data);
     }
 
