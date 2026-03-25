@@ -10,6 +10,7 @@ import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
+import { SmartAssistant } from './components/SmartAssistant';
 import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
 import { EXTERNAL_PRODUCTS_URL } from './config';
 import { Product } from './types';
@@ -109,19 +110,23 @@ export default function App() {
     const unsubscribeProducts = subscribeToProducts(async (updatedProducts) => {
       const externalProducts = await fetchExternalProducts();
       
-      const allProducts = [...DEFAULT_PRODUCTS, ...externalProducts];
-      const seenIds = new Set(allProducts.map(p => p.id));
+      const safeExternalProducts = Array.isArray(externalProducts) ? externalProducts : [];
+      const allProducts = [...safeExternalProducts];
+      const seenIds = new Set(allProducts.map(p => p?.id).filter(Boolean));
       
       if (updatedProducts) {
         updatedProducts.forEach(p => {
-          if (!seenIds.has(p.id)) {
+          if (p && p.id && !seenIds.has(p.id)) {
             allProducts.push(p);
             seenIds.add(p.id);
           }
         });
       }
       
-      setProducts(allProducts);
+      // Filter out any null/undefined products that might have come from external JSON
+      const validProducts = allProducts.filter(p => p && typeof p === 'object');
+      
+      setProducts(validProducts);
       setIsLoaded(true);
     });
 
@@ -251,7 +256,7 @@ export default function App() {
     
     for (let i = products.length - 1; i >= 0; i--) {
       const p = products[i];
-      const key = p.name.toLowerCase().trim();
+      const key = String(p.name || '').toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
         unique.unshift(p);
@@ -311,8 +316,8 @@ export default function App() {
   const handleRestoreDefaults = () => {
     if (window.confirm('¿Estás seguro de que quieres restaurar los productos por defecto? Esto no borrará tus productos actuales, solo añadirá los básicos si faltan.')) {
       import('./constants').then(async ({ PRODUCTS: defaultProducts }) => {
-        const existingNames = new Set(products.map(p => p.name.toLowerCase().trim()));
-        const toAdd = defaultProducts.filter(p => !existingNames.has(p.name.toLowerCase().trim()));
+        const existingNames = new Set(products.map(p => String(p.name || '').toLowerCase().trim()));
+        const toAdd = defaultProducts.filter(p => !existingNames.has(String(p.name || '').toLowerCase().trim()));
         if (toAdd.length === 0) {
           showToast('Ya tienes todos los productos básicos');
           return;
@@ -481,8 +486,10 @@ export default function App() {
       if (!sectionMatch) return false;
 
       const matchesCategory = selectedCategory ? product.category === selectedCategory : true;
-      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            product.id.includes(searchQuery);
+      const productName = String(product.name || '');
+      const productId = String(product.id || '');
+      const matchesSearch = productName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            productId.includes(searchQuery);
       const matchesLocal = filterLocal ? product.isLocal : true;
       const matchesSeasonal = filterSeasonal ? product.isSeasonal : true;
       
@@ -491,9 +498,11 @@ export default function App() {
 
     // Apply sorting
     result.sort((a, b) => {
-      if (sortMode === 'az') return a.name.localeCompare(b.name);
-      if (sortMode === 'za') return b.name.localeCompare(a.name);
-      if (sortMode === 'size') return (a.size || 0) - (b.size || 0);
+      const aName = String(a.name || '');
+      const bName = String(b.name || '');
+      if (sortMode === 'az') return aName.localeCompare(bName);
+      if (sortMode === 'za') return bName.localeCompare(aName);
+      if (sortMode === 'size') return (Number(a.size) || 0) - (Number(b.size) || 0);
       // 'newest' assumes newer items are added to the beginning of the array or we can use ID if it's timestamp based.
       // For now, if 'newest', we can just reverse the default order or assume the original array is newest first.
       // Since we unshift in loadProducts, the original array is newest first.
@@ -516,51 +525,54 @@ export default function App() {
 
   if (appSection === 'home') {
     return (
-      <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
-        <div className="text-center mb-12">
-           <img 
-             src={customLogo || "/LOGO.png"} 
-             alt="BonAny Logo" 
-             className="h-24 mx-auto mb-6 object-contain"
-             onError={(e) => {
-               e.currentTarget.style.display = 'none';
-               const fallback = document.getElementById('home-fallback-logo');
-               if (fallback) fallback.style.display = 'flex';
-               const fallbackText = document.getElementById('home-fallback-text');
-               if (fallbackText) fallbackText.style.display = 'block';
-             }}
-           />
-           <div id="home-fallback-logo" className="w-20 h-20 bg-emerald-500 rounded-3xl hidden items-center justify-center text-white shadow-lg mx-auto mb-6">
-             <Leaf size={40} />
-           </div>
-           <h1 id="home-fallback-text" className="text-4xl font-bold tracking-tight text-slate-900 mb-2 hidden">Bonany - Catálogo Público</h1>
-           <p className="text-lg text-slate-500">Selecciona el catálogo a presentar</p>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
-           <button 
-             onClick={() => setAppSection('produce')}
-             className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-md transition-all border border-black/5 flex flex-col items-center text-center group"
-           >
-             <div className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-               <Leaf size={48} />
+      <>
+        <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
+          <div className="text-center mb-12">
+             <img 
+               src={customLogo || "/LOGO.png"} 
+               alt="BonAny Logo" 
+               className="h-24 mx-auto mb-6 object-contain"
+               onError={(e) => {
+                 e.currentTarget.style.display = 'none';
+                 const fallback = document.getElementById('home-fallback-logo');
+                 if (fallback) fallback.style.display = 'flex';
+                 const fallbackText = document.getElementById('home-fallback-text');
+                 if (fallbackText) fallbackText.style.display = 'block';
+               }}
+             />
+             <div id="home-fallback-logo" className="w-20 h-20 bg-emerald-500 rounded-3xl hidden items-center justify-center text-white shadow-lg mx-auto mb-6">
+               <Leaf size={40} />
              </div>
-             <h2 className="text-2xl font-bold text-slate-900 mb-2">Frutas y Verduras</h2>
-             <p className="text-slate-500">Catálogo completo de productos frescos, hortalizas, setas y más.</p>
-           </button>
-
-           <button 
-             onClick={() => setAppSection('juices')}
-             className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-md transition-all border border-black/5 flex flex-col items-center text-center group"
-           >
-             <div className="w-24 h-24 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-               <CupSoda size={48} />
-             </div>
-             <h2 className="text-2xl font-bold text-slate-900 mb-2">Zumos</h2>
-             <p className="text-slate-500">Catálogo exclusivo de zumos, jugos, licuados y batidos.</p>
-           </button>
+             <h1 id="home-fallback-text" className="text-4xl font-bold tracking-tight text-slate-900 mb-2 hidden">Bonany - Catálogo Público</h1>
+             <p className="text-lg text-slate-500">Selecciona el catálogo a presentar</p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+             <button 
+               onClick={() => setAppSection('produce')}
+               className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-md transition-all border border-black/5 flex flex-col items-center text-center group"
+             >
+               <div className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                 <Leaf size={48} />
+               </div>
+               <h2 className="text-2xl font-bold text-slate-900 mb-2">Frutas y Verduras</h2>
+               <p className="text-slate-500">Catálogo completo de productos frescos, hortalizas, setas y más.</p>
+             </button>
+  
+             <button 
+               onClick={() => setAppSection('juices')}
+               className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-md transition-all border border-black/5 flex flex-col items-center text-center group"
+             >
+               <div className="w-24 h-24 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                 <CupSoda size={48} />
+               </div>
+               <h2 className="text-2xl font-bold text-slate-900 mb-2">Zumos</h2>
+               <p className="text-slate-500">Catálogo exclusivo de zumos, jugos, licuados y batidos.</p>
+             </button>
+          </div>
         </div>
-      </div>
+        <SmartAssistant products={products} />
+      </>
     );
   }
 
@@ -1053,6 +1065,8 @@ export default function App() {
         accept="image/*"
         className="hidden"
       />
+      {/* Smart Assistant */}
+      <SmartAssistant products={products} />
     </div>
   );
 }
