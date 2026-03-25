@@ -6,7 +6,9 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 export const getSmartResponse = async (prompt: string, products: Product[]) => {
   const model = "gemini-3.1-pro-preview";
   
-  const catalogContext = products.map(p => `- ${p.name} (${p.category}): ${p.description || 'Sin descripción'}`).join('\n');
+  const catalogContext = products.length > 50 
+    ? products.slice(0, 50).map(p => `- ${p.name} (${p.category}): ${p.description || 'Sin descripción'}`).join('\n') + "\n... y muchos más productos disponibles en nuestra tienda."
+    : products.map(p => `- ${p.name} (${p.category}): ${p.description || 'Sin descripción'}`).join('\n');
 
   const systemInstruction = `Eres el Asistente Inteligente de "Fruites Bonany", una frutería y verdulería de alta calidad en Mallorca.
 Tu objetivo es ayudar a los clientes a:
