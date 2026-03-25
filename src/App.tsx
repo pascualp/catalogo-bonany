@@ -10,11 +10,12 @@ import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
+import { JsonPasteModal } from './components/JsonPasteModal';
 import { SmartAssistant } from './components/SmartAssistant';
 import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
 import { EXTERNAL_PRODUCTS_URL } from './config';
 import { Product } from './types';
-import { saveProducts, saveProduct, deleteProduct, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
+import { saveProducts, saveProduct, deleteProduct, deleteProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -82,6 +83,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastOpenedRef = useRef<number>(0);
 
@@ -241,8 +243,8 @@ export default function App() {
     if (window.confirm('¿ESTÁS SEGURO? Esto borrará permanentemente TODOS los productos de la base de datos. Esta acción no se puede deshacer.')) {
       showToast('Borrando catálogo...');
       try {
-        const promises = products.map(p => deleteProduct(p.id));
-        await Promise.all(promises);
+        const productIds = products.map(p => p.id);
+        await deleteProducts(productIds);
         showToast('Catálogo borrado correctamente');
       } catch (error) {
         showToast('Error al borrar el catálogo');
@@ -268,7 +270,7 @@ export default function App() {
     
     if (toDelete.length > 0) {
       try {
-        await Promise.all(toDelete.map(id => deleteProduct(id)));
+        await deleteProducts(toDelete);
         showToast(`Se han eliminado ${toDelete.length} productos repetidos`);
       } catch (error) {
         showToast('Error al eliminar duplicados');
@@ -320,15 +322,14 @@ export default function App() {
     }
   };
 
-  const handlePasteJson = () => {
-    const jsonStr = window.prompt('Pega aquí el contenido JSON de tu catálogo completo:');
-    if (!jsonStr) return;
-
+  const handlePasteJson = (jsonStr: string) => {
     try {
       const importedProducts = JSON.parse(jsonStr);
       if (Array.isArray(importedProducts)) {
+        showToast('Guardando catálogo en la base de datos...');
         saveProducts(importedProducts).then(() => {
           showToast(`Importados ${importedProducts.length} productos correctamente`);
+          setIsPasteModalOpen(false);
         }).catch(err => {
           showToast('Error al guardar en la base de datos');
         });
@@ -1094,7 +1095,10 @@ export default function App() {
             setIsAddingProduct(true);
           }}
           onSyncFromExternal={handleSyncFromExternal}
-          onPasteJson={handlePasteJson}
+          onPasteJson={() => {
+            setIsAdminPanelOpen(false);
+            setIsPasteModalOpen(true);
+          }}
           onClose={() => setIsAdminPanelOpen(false)}
           setProducts={setProducts}
           showToast={showToast}
@@ -1107,6 +1111,13 @@ export default function App() {
         <ProductForm
           onSave={handleAddManualProduct}
           onCancel={() => setIsAddingProduct(false)}
+        />
+      )}
+
+      {isPasteModalOpen && (
+        <JsonPasteModal
+          onSave={handlePasteJson}
+          onClose={() => setIsPasteModalOpen(false)}
         />
       )}
 

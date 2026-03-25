@@ -8,7 +8,8 @@ import {
   query, 
   orderBy, 
   onSnapshot,
-  getDocFromServer
+  getDocFromServer,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product } from '../types';
@@ -81,21 +82,53 @@ export const testConnection = async () => {
 export const saveProducts = async (products: Product[]): Promise<void> => {
   try {
     // Firestore has a limit of 500 operations per batch.
-    // We'll process in chunks of 400 to be safe.
-    const chunkSize = 400;
+    // We'll process in chunks of 100 to be conservative and avoid exhausting the write stream.
+    const chunkSize = 100;
     for (let i = 0; i < products.length; i += chunkSize) {
       const chunk = products.slice(i, i + chunkSize);
-      const promises = chunk.map(product => {
+      const batch = writeBatch(db);
+      
+      chunk.forEach(product => {
         const docId = String(product.id);
-        return setDoc(doc(db, PRODUCTS_COLLECTION, docId), {
+        const docRef = doc(db, PRODUCTS_COLLECTION, docId);
+        batch.set(docRef, {
           ...product,
           id: docId
         });
       });
-      await Promise.all(promises);
+      
+      await batch.commit();
+      
+      // Small delay to prevent overloading the SDK's write stream
+      if (i + chunkSize < products.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, PRODUCTS_COLLECTION);
+  }
+};
+
+export const deleteProducts = async (productIds: string[]): Promise<void> => {
+  try {
+    const chunkSize = 100;
+    for (let i = 0; i < productIds.length; i += chunkSize) {
+      const chunk = productIds.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      
+      chunk.forEach(id => {
+        const docRef = doc(db, PRODUCTS_COLLECTION, id);
+        batch.delete(docRef);
+      });
+      
+      await batch.commit();
+      
+      if (i + chunkSize < productIds.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, PRODUCTS_COLLECTION);
   }
 };
 
