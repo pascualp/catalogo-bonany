@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Clipboard, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Clipboard, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
+import { getIsQuotaExceeded } from '../lib/db';
 
 interface JsonPasteModalProps {
   onSave: (json: string) => void;
@@ -48,6 +49,17 @@ export const JsonPasteModal: React.FC<JsonPasteModalProps> = ({ onSave, onClose 
         </div>
 
         <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-4">
+          {getIsQuotaExceeded() && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+              <RefreshCcw size={18} className="text-amber-500 mt-0.5 animate-spin" />
+              <div>
+                <p className="text-xs font-bold text-amber-700">Límite de Firebase alcanzado</p>
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  No puedes guardar cambios en la nube ahora mismo. Si pegas el JSON, los cambios solo se verán en este navegador hasta que se reinicie la cuota mañana.
+                </p>
+              </div>
+            </div>
+          )}
           <p className="text-sm text-slate-500 leading-relaxed">
             Copia el contenido de tu archivo <code className="bg-slate-100 px-1 rounded">productos.json</code> y pégalo en el cuadro de abajo. 
             Esto reemplazará o actualizará los productos existentes.

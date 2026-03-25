@@ -46,9 +46,21 @@ interface FirestoreErrorInfo {
   }
 }
 
+let isQuotaExceededGlobal = false;
+
+export const getIsQuotaExceeded = () => isQuotaExceededGlobal;
+
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const isQuotaError = errorMessage.includes('Quota limit exceeded') || errorMessage.includes('resource-exhausted');
+
+  if (isQuotaError) {
+    isQuotaExceededGlobal = true;
+    console.warn('Firestore Quota Exceeded. The app will use local/cached data if available.');
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -65,6 +77,14 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
+  
+  if (isQuotaError) {
+    // We don't throw for quota errors in read operations to allow fallback
+    if (operationType === OperationType.LIST || operationType === OperationType.GET) {
+      return; 
+    }
+  }
+
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
@@ -82,8 +102,8 @@ export const testConnection = async () => {
 export const saveProducts = async (products: Product[]): Promise<void> => {
   try {
     // Firestore has a limit of 500 operations per batch.
-    // We'll process in chunks of 25 to be conservative and avoid exhausting the write stream.
-    const chunkSize = 25;
+    // We'll process in chunks of 100 to be faster while staying safe.
+    const chunkSize = 100;
     for (let i = 0; i < products.length; i += chunkSize) {
       const chunk = products.slice(i, i + chunkSize);
       const batch = writeBatch(db);
@@ -101,7 +121,7 @@ export const saveProducts = async (products: Product[]): Promise<void> => {
       
       // Delay to prevent overloading the SDK's write stream
       if (i + chunkSize < products.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
   } catch (error) {
@@ -173,19 +193,27 @@ export const subscribeToProducts = (callback: (products: Product[]) => void) => 
   });
 };
 
-export const saveLogo = async (logoBase64: string): Promise<void> => {
+export interface GlobalSettings {
+  logo?: string | null;
+  lastSyncVersion?: number;
+  cloudinaryCloudName?: string;
+  cloudinaryUploadPreset?: string;
+  useCloudinary?: boolean;
+}
+
+export const saveSettings = async (settings: Partial<GlobalSettings>): Promise<void> => {
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), { logo: logoBase64 }, { merge: true });
+    await setDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), settings, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
   }
 };
 
-export const loadLogo = async (): Promise<string | null> => {
+export const loadSettings = async (): Promise<GlobalSettings | null> => {
   try {
     const docSnap = await getDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC));
     if (docSnap.exists()) {
-      return docSnap.data().logo || null;
+      return docSnap.data() as GlobalSettings;
     }
     return null;
   } catch (error) {
@@ -194,14 +222,29 @@ export const loadLogo = async (): Promise<string | null> => {
   }
 };
 
-export const subscribeToLogo = (callback: (logo: string | null) => void) => {
+export const subscribeToSettings = (callback: (settings: GlobalSettings | null) => void) => {
   return onSnapshot(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), (docSnap) => {
     if (docSnap.exists()) {
-      callback(docSnap.data().logo || null);
+      callback(docSnap.data() as GlobalSettings);
     } else {
       callback(null);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
+  });
+};
+
+export const saveLogo = async (logoBase64: string): Promise<void> => {
+  return saveSettings({ logo: logoBase64 });
+};
+
+export const loadLogo = async (): Promise<string | null> => {
+  const settings = await loadSettings();
+  return settings?.logo || null;
+};
+
+export const subscribeToLogo = (callback: (logo: string | null) => void) => {
+  return subscribeToSettings((settings) => {
+    callback(settings?.logo || null);
   });
 };

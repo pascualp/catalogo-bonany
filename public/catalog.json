@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "products": [
+    {
+      "id": "1",
+      "code": "101",
+      "name": "TOMATE RAMA",
+      "category": "hortalizas",
+      "image": "https://images.unsplash.com/photo-1592924357228-91a4daadcfea?auto=format&fit=crop&q=80&w=400",
+      "price": 0,
+      "rating": 5,
+      "description": "Tomate de rama fresco y sabroso (Vista previa).",
+      "isLocal": true,
+      "isSeasonal": true
+    },
+    {
+      "id": "2",
+      "code": "102",
+      "name": "MANZANA GOLDEN",
+      "category": "frutas",
+      "image": "https://images.unsplash.com/photo-1567306226416-28f0efdc88ce?auto=format&fit=crop&q=80&w=400",
+      "price": 0,
+      "rating": 5,
+      "description": "Manzana golden dulce y crujiente (Vista previa).",
+      "isLocal": false,
+      "isSeasonal": true
+    }
+  ]
+}

@@ -15,7 +15,7 @@ import { SmartAssistant } from './components/SmartAssistant';
 import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
 import { EXTERNAL_PRODUCTS_URL } from './config';
 import { Product } from './types';
-import { saveProducts, saveProduct, deleteProduct, deleteProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
+import { saveProducts, saveProduct, deleteProduct, deleteProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection, loadSettings, saveSettings, getIsQuotaExceeded } from './lib/db';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -97,6 +97,73 @@ export default function App() {
 
   useEffect(() => {
     testConnection();
+    
+    // Auto-sync from Vercel-hosted JSON
+    const autoSync = async () => {
+      try {
+        const response = await fetch('/catalog.json');
+        if (!response.ok) return;
+        const catalogData = await response.json();
+        
+        if (!catalogData || typeof catalogData.version !== 'number' || !Array.isArray(catalogData.products)) {
+          return;
+        }
+
+        // Fallback: If products are still empty after a while, use catalogData
+        setTimeout(() => {
+          setProducts(prev => {
+            if (prev.length === 0) {
+              console.log('Using catalog.json as fallback due to empty Firestore (possible quota limit)');
+              return catalogData.products;
+            }
+            return prev;
+          });
+          setIsLoaded(true);
+        }, 3000);
+
+        const settings = await loadSettings();
+        const currentVersion = settings?.lastSyncVersion || 0;
+        
+        if (catalogData.version > currentVersion) {
+          if (getIsQuotaExceeded()) {
+            console.log('Quota exceeded, skipping auto-sync write to Firestore. Using catalog.json directly.');
+            setProducts(catalogData.products);
+            setIsLoaded(true);
+            return;
+          }
+
+          console.log(`Auto-syncing catalog from version ${currentVersion} to ${catalogData.version}`);
+          setIsSyncing(true);
+          showToast(`Actualizando catálogo a v${catalogData.version}...`);
+          
+          try {
+            // Save products using the safe batching method
+            await saveProducts(catalogData.products);
+            
+            // Update version in Firestore settings
+            await saveSettings({ lastSyncVersion: catalogData.version });
+            
+            showToast('Catálogo actualizado automáticamente');
+          } catch (syncError) {
+            console.error('Sync error:', syncError);
+            // If it's a quota error, we just ignore it and use the local data
+            if (String(syncError).includes('Quota') || String(syncError).includes('resource-exhausted')) {
+              showToast('Límite de Firebase alcanzado. Usando datos locales.');
+              setProducts(catalogData.products);
+              setIsLoaded(true);
+            } else {
+              showToast('Error en la actualización automática');
+            }
+          } finally {
+            setIsSyncing(false);
+          }
+        }
+      } catch (error) {
+        console.error('Error in auto-sync:', error);
+      }
+    };
+    
+    autoSync();
   }, []);
 
   useEffect(() => {
@@ -118,8 +185,16 @@ export default function App() {
 
     const unsubscribeProducts = subscribeToProducts(async (updatedProducts) => {
       const validProducts = (updatedProducts || []).filter(p => p && typeof p === 'object');
-      setProducts(validProducts);
-      setIsLoaded(true);
+      if (validProducts.length > 0) {
+        setProducts(validProducts);
+        setIsLoaded(true);
+      }
+
+      // If we have a quota error, we might want to stop the listener if it's empty
+      if (getIsQuotaExceeded() && validProducts.length === 0) {
+        console.log('Quota exceeded and no products from Firestore. Relying on catalog.json.');
+        // The autoSync fallback will handle this
+      }
 
       // Auto-seed if empty and we haven't tried yet
       if (validProducts.length === 0 && !hasAttemptedSyncRef.current) {
@@ -129,10 +204,18 @@ export default function App() {
         const external = await fetchExternalProducts();
         if (external.length > 0) {
           console.log(`Seeding ${external.length} products from external URL`);
-          await saveProducts(external);
+          try {
+            await saveProducts(external);
+          } catch (e) {
+            console.warn('Failed to seed products (quota?)');
+          }
         } else {
           console.log(`Seeding from DEFAULT_PRODUCTS`);
-          await saveProducts(DEFAULT_PRODUCTS);
+          try {
+            await saveProducts(DEFAULT_PRODUCTS);
+          } catch (e) {
+            console.warn('Failed to seed products (quota?)');
+          }
         }
       }
     });
@@ -298,15 +381,19 @@ export default function App() {
   };
 
   const handleExportData = () => {
-    const dataStr = JSON.stringify(products, null, 2);
+    const exportData = {
+      version: Date.now(),
+      products: products
+    };
+    const dataStr = JSON.stringify(exportData, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    const exportFileDefaultName = `productos_fruites_bonany_${new Date().toISOString().split('T')[0]}.json`;
+    const exportFileDefaultName = `catalog_fruites_bonany_${new Date().toISOString().split('T')[0]}.json`;
     
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
-    showToast('Copia de seguridad descargada');
+    showToast('Catálogo exportado (formato GitHub)');
   };
 
   const handleSyncFromExternal = async () => {
@@ -672,8 +759,17 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#f2f2f7] text-black overflow-hidden relative font-sans">
-      {/* Hidden feature toast */}
+    <div className="flex flex-col h-screen bg-[#f2f2f7] text-black overflow-hidden relative font-sans">
+      {/* Quota Warning Banner */}
+      {getIsQuotaExceeded() && (
+        <div className="bg-amber-500 text-white text-[10px] font-bold py-1 px-4 text-center sticky top-0 z-[100] flex items-center justify-center gap-2">
+          <RefreshCcw size={12} className="animate-spin" />
+          <span>MODO OFFLINE: Límite de Firebase alcanzado. Usando catálogo de respaldo.</span>
+        </div>
+      )}
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Hidden feature toast */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
@@ -1175,6 +1271,7 @@ export default function App() {
       />
       {/* Smart Assistant */}
       <SmartAssistant products={products} />
+      </div>
     </div>
   );
 }

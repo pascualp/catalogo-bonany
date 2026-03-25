@@ -1,6 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Download, Upload, RefreshCcw, Trash2, Plus, ShieldCheck, X } from 'lucide-react';
+import { Download, Upload, RefreshCcw, Trash2, Plus, ShieldCheck, X, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { saveSettings, loadSettings, getIsQuotaExceeded } from '../lib/db';
 
 interface AdminPanelProps {
   onExport: () => void;
@@ -35,6 +36,155 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const optimizeInputRef = useRef<HTMLInputElement>(null);
+  const [cloudinaryCloudName, setCloudinaryCloudName] = useState('');
+  const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState('');
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationProgress, setOptimizationProgress] = useState(0);
+  const [optimizationMode, setOptimizationMode] = useState<'cloudinary' | 'local'>('local');
+
+  React.useEffect(() => {
+    loadSettings().then(settings => {
+      if (settings) {
+        setCloudinaryCloudName(settings.cloudinaryCloudName || '');
+        setCloudinaryUploadPreset(settings.cloudinaryUploadPreset || '');
+      }
+    });
+  }, []);
+
+  const handleSaveCloudinary = async () => {
+    try {
+      await saveSettings({
+        cloudinaryCloudName,
+        cloudinaryUploadPreset,
+        useCloudinary: !!(cloudinaryCloudName && cloudinaryUploadPreset)
+      });
+      showToast('Configuración de Cloudinary guardada');
+    } catch (error) {
+      showToast('Error al guardar configuración');
+    }
+  };
+
+  const optimizeAndUpload = async (file?: File) => {
+    let jsonStr = '';
+    
+    if (file) {
+      jsonStr = await file.text();
+    } else {
+      jsonStr = window.prompt('Pega aquí el JSON para optimizarlo:') || '';
+    }
+
+    if (!jsonStr) return;
+
+    if (optimizationMode === 'cloudinary' && (!cloudinaryCloudName || !cloudinaryUploadPreset)) {
+      showToast('Configura Cloudinary primero o usa Compresión Local');
+      return;
+    }
+
+    try {
+      const data = JSON.parse(jsonStr);
+      const products = Array.isArray(data) ? data : (data.products || []);
+      
+      if (!Array.isArray(products)) {
+        showToast('Formato JSON no válido');
+        return;
+      }
+
+      setIsOptimizing(true);
+      setOptimizationProgress(0);
+      
+      const productsToProcess = [...products];
+      const optimizedProducts = [];
+      const total = productsToProcess.length;
+      const concurrency = optimizationMode === 'cloudinary' ? 5 : 20;
+
+      const processProduct = async (p: any, index: number) => {
+        let imageUrl = p.image || p.imagen;
+
+        if (imageUrl && imageUrl.startsWith('data:image')) {
+          if (optimizationMode === 'cloudinary') {
+            try {
+              const formData = new FormData();
+              formData.append('file', imageUrl);
+              formData.append('upload_preset', cloudinaryUploadPreset);
+              
+              const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+              });
+              
+              if (res.ok) {
+                const cloudData = await res.json();
+                imageUrl = cloudData.secure_url;
+              }
+            } catch (e) {
+              console.error('Error uploading to Cloudinary:', e);
+            }
+          } else {
+            // Local compression: Resize to very small
+            try {
+              imageUrl = await new Promise((resolve) => {
+                const img = new Image();
+                img.src = imageUrl;
+                img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  const size = 200; // Small size for local storage
+                  canvas.width = size;
+                  canvas.height = size;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(img, 0, 0, size, size);
+                    resolve(canvas.toDataURL('image/jpeg', 0.4)); // Low quality
+                  } else {
+                    resolve(imageUrl);
+                  }
+                };
+                img.onerror = () => resolve(imageUrl);
+              });
+            } catch (e) {
+              console.error('Error compressing locally:', e);
+            }
+          }
+        }
+
+        return {
+          ...p,
+          image: imageUrl,
+          id: p.id || `opt-${Date.now()}-${index}`
+        };
+      };
+
+      // Process in chunks
+      for (let i = 0; i < productsToProcess.length; i += concurrency) {
+        const chunk = productsToProcess.slice(i, i + concurrency);
+        const results = await Promise.all(chunk.map((p, idx) => processProduct(p, i + idx)));
+        optimizedProducts.push(...results);
+        setOptimizationProgress(Math.round(((i + chunk.length) / total) * 100));
+      }
+
+      const finalJson = {
+        version: Date.now(),
+        products: optimizedProducts
+      };
+
+      const dataStr = JSON.stringify(finalJson); // Minified (no spaces)
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const exportFileDefaultName = `catalog_reducido_${new Date().toISOString().split('T')[0]}.json`;
+      
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', url);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+      URL.revokeObjectURL(url);
+
+      showToast('¡Archivo reducido descargado! Ahora súbelo a GitHub.');
+    } catch (err) {
+      showToast('Error al procesar el JSON');
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -54,6 +204,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh] no-scrollbar">
+          {getIsQuotaExceeded() && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl mb-4">
+              <p className="text-xs font-bold text-amber-700 flex items-center gap-2">
+                <RefreshCcw size={14} className="animate-spin" />
+                Límite de Firebase alcanzado
+              </p>
+              <p className="text-[10px] text-amber-600 mt-1">
+                La base de datos está en modo lectura. Los cambios no se guardarán en la nube hasta mañana, pero puedes seguir usando la app con el catálogo de respaldo.
+              </p>
+            </div>
+          )}
           {!isAdmin ? (
             <div className="text-center py-8">
               <p className="text-rose-500 font-bold mb-2">Acceso Denegado</p>
@@ -177,6 +338,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <p className="text-[10px] opacity-70">Elimina permanentemente todos los datos</p>
                   </div>
                 </button>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Configuración de Imágenes (Cloudinary)</p>
+                <div className="space-y-3 p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-700 uppercase ml-1">Cloud Name</label>
+                    <input 
+                      type="text" 
+                      value={cloudinaryCloudName}
+                      onChange={(e) => setCloudinaryCloudName(e.target.value)}
+                      placeholder="ej: dxabc123"
+                      className="w-full mt-1 p-2 text-sm rounded-xl border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-700 uppercase ml-1">Upload Preset (Unsigned)</label>
+                    <input 
+                      type="text" 
+                      value={cloudinaryUploadPreset}
+                      onChange={(e) => setCloudinaryUploadPreset(e.target.value)}
+                      placeholder="ej: ml_default"
+                      className="w-full mt-1 p-2 text-sm rounded-xl border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    onClick={handleSaveCloudinary}
+                    className="w-full py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                  >
+                    Guardar Configuración
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-4 space-y-3">
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                  <button 
+                    onClick={() => setOptimizationMode('local')}
+                    className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${optimizationMode === 'local' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
+                  >
+                    Compresión Local
+                  </button>
+                  <button 
+                    onClick={() => setOptimizationMode('cloudinary')}
+                    className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${optimizationMode === 'cloudinary' ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500'}`}
+                  >
+                    Nube (Cloudinary)
+                  </button>
+                </div>
+
+                <input
+                  type="file"
+                  ref={optimizeInputRef}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) optimizeAndUpload(file);
+                  }}
+                  accept=".json"
+                  className="hidden"
+                />
+                <button
+                  onClick={() => optimizeInputRef.current?.click()}
+                  disabled={isOptimizing}
+                  className={`w-full flex items-center justify-center gap-3 p-4 text-white rounded-2xl shadow-lg transition-all group disabled:opacity-50 ${optimizationMode === 'local' ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-orange-200' : 'bg-gradient-to-r from-cyan-500 to-blue-500 shadow-cyan-200'}`}
+                >
+                  {isOptimizing ? (
+                    <div className="flex items-center gap-2">
+                      <RefreshCcw size={20} className="animate-spin" />
+                      <span className="font-bold">Procesando: {optimizationProgress}%</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Sparkles size={20} className="group-hover:rotate-12 transition-transform" />
+                      <span className="font-bold">
+                        {optimizationMode === 'local' ? 'Reducir Tamaño del Archivo' : 'Subir Imágenes a la Nube'}
+                      </span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-slate-400 text-center px-4 leading-tight">
+                  {optimizationMode === 'local' 
+                    ? 'Reduce las fotos al mínimo para que GitHub las acepte sin configurar nada.' 
+                    : 'Saca las fotos del archivo y las guarda en Cloudinary (máxima calidad).'}
+                </p>
               </div>
 
               <div className="pt-4 border-t border-slate-100">
