@@ -1,1 +1,1 @@
-export const EXTERNAL_PRODUCTS_URL = '/productos.json';
+export const EXTERNAL_PRODUCTS_URL = '/productos.json.json';
