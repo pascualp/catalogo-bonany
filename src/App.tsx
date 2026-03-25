@@ -11,6 +11,7 @@ import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
 import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
+import { EXTERNAL_PRODUCTS_URL } from './config';
 import { Product } from './types';
 import { saveProducts, saveProduct, deleteProduct, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
 
@@ -93,9 +94,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
-      const allProducts = [...DEFAULT_PRODUCTS];
-      const seenIds = new Set(DEFAULT_PRODUCTS.map(p => p.id));
+    const fetchExternalProducts = async () => {
+      if (!EXTERNAL_PRODUCTS_URL) return [];
+      try {
+        const response = await fetch(EXTERNAL_PRODUCTS_URL);
+        if (!response.ok) throw new Error('Failed to fetch');
+        return await response.json();
+      } catch (e) {
+        console.error('Error fetching external products:', e);
+        return [];
+      }
+    };
+
+    const unsubscribeProducts = subscribeToProducts(async (updatedProducts) => {
+      const externalProducts = await fetchExternalProducts();
+      
+      const allProducts = [...DEFAULT_PRODUCTS, ...externalProducts];
+      const seenIds = new Set(allProducts.map(p => p.id));
       
       if (updatedProducts) {
         updatedProducts.forEach(p => {
