@@ -10,7 +10,7 @@ import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
 import { AdminPanel } from './components/AdminPanel';
-import { CATEGORIES } from './constants';
+import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
 import { Product } from './types';
 import { saveProducts, saveProduct, deleteProduct, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
 
@@ -94,14 +94,19 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
-      if (updatedProducts && updatedProducts.length > 0) {
-        setProducts(updatedProducts);
-      } else {
-        // If no products in Firestore, try loading defaults if it's the first time
-        loadProducts().then(stored => {
-          if (stored && stored.length > 0) setProducts(stored);
+      const allProducts = [...DEFAULT_PRODUCTS];
+      const seenIds = new Set(DEFAULT_PRODUCTS.map(p => p.id));
+      
+      if (updatedProducts) {
+        updatedProducts.forEach(p => {
+          if (!seenIds.has(p.id)) {
+            allProducts.push(p);
+            seenIds.add(p.id);
+          }
         });
       }
+      
+      setProducts(allProducts);
       setIsLoaded(true);
     });
 
