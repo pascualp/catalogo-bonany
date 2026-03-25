@@ -11,9 +11,13 @@ export const CATEGORIES: Category[] = [
   { id: 'hierbas', name: 'Hierbas Aromáticas', icon: 'Wind', section: 'produce' },
   { id: 'setas', name: 'Setas y Hongos', icon: 'Mushroom', section: 'produce' },
   { id: 'zumos-naturales', name: 'Zumos Naturales', icon: 'CupSoda', section: 'juices' },
+  { id: 'zumos', name: 'Zumos', icon: 'CupSoda', section: 'juices' },
+  { id: 'jugos', name: 'Jugos', icon: 'CupSoda', section: 'juices' },
   { id: 'batidos', name: 'Batidos y Smoothies', icon: 'CupSoda', section: 'juices' },
+  { id: 'smoothies', name: 'Smoothies', icon: 'CupSoda', section: 'juices' },
   { id: 'licuados', name: 'Licuados Especiales', icon: 'CupSoda', section: 'juices' },
   { id: 'otros-zumos', name: 'Otras Bebidas', icon: 'CupSoda', section: 'juices' },
+  { id: 'bebidas', name: 'Bebidas', icon: 'CupSoda', section: 'juices' },
   { id: 'otros', name: 'Otros', icon: 'Package', section: 'other' },
 ];
 

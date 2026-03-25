@@ -324,9 +324,10 @@ export default function App() {
       const importedProducts = await response.json();
       if (Array.isArray(importedProducts)) {
         // Ensure all products have an ID
-        const productsWithIds = importedProducts.map((p, i) => ({
+        const productsWithIds = importedProducts.map((p: any, i: number) => ({
           ...p,
-          id: p.id || `ext-${Date.now()}-${i}`
+          id: p.id || `ext-${Date.now()}-${i}`,
+          category: p.category || p.categoria || 'otros'
         }));
         
         await saveProducts(productsWithIds);
@@ -347,9 +348,10 @@ export default function App() {
       const importedProducts = JSON.parse(jsonStr);
       if (Array.isArray(importedProducts)) {
         // Ensure all products have an ID
-        const productsWithIds = importedProducts.map((p, i) => ({
+        const productsWithIds = importedProducts.map((p: any, i: number) => ({
           ...p,
-          id: p.id || `paste-${Date.now()}-${i}`
+          id: p.id || `paste-${Date.now()}-${i}`,
+          category: p.category || p.categoria || 'otros'
         }));
 
         showToast('Guardando catálogo en la base de datos...');
@@ -557,13 +559,28 @@ export default function App() {
 
   const filteredProducts = useMemo(() => {
     let result = products.filter((product) => {
-      const productCategory = CATEGORIES.find(c => c.id === product.category);
+      const productCategory = CATEGORIES.find(c => 
+        c.id.toLowerCase() === String(product.category).toLowerCase() || 
+        c.name.toLowerCase() === String(product.category).toLowerCase()
+      );
+      let section = productCategory?.section;
+      
+      // Fallback for common juice keywords if category is unknown or not in juices section
+      if (section !== 'juices' && product.category) {
+        const cat = String(product.category).toLowerCase();
+        if (cat.includes('zumo') || cat.includes('jugo') || cat.includes('batido') || cat.includes('licuado') || cat.includes('smoothie') || cat.includes('bebida')) {
+          section = 'juices';
+        }
+      }
+
       const sectionMatch = appSection === 'home' || 
-                           productCategory?.section === appSection || 
-                           (appSection === 'produce' && productCategory?.section === 'other');
+                           section === appSection || 
+                           (appSection === 'produce' && section === 'other');
       if (!sectionMatch) return false;
 
-      const matchesCategory = selectedCategory ? product.category === selectedCategory : true;
+      const matchesCategory = selectedCategory ? 
+        (String(product.category).toLowerCase() === selectedCategory.toLowerCase() || 
+         CATEGORIES.find(c => c.id === selectedCategory)?.name.toLowerCase() === String(product.category).toLowerCase()) : true;
       const productName = String(product.name || '');
       const productId = String(product.id || '');
       const matchesSearch = productName.toLowerCase().includes(searchQuery.toLowerCase()) || 
