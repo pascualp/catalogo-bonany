@@ -5,7 +5,7 @@
 
 import React, { useState, useMemo, useRef, ChangeEvent, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Leaf, MapPin, Calendar, Menu, X, ChevronRight, LayoutGrid, Trash2, ArrowLeft, CupSoda, List as ListIcon, Grid as GridIcon, ArrowDownAZ, ArrowUpZA, Clock, Ruler } from 'lucide-react';
+import { Search, Leaf, MapPin, Calendar, Menu, X, ChevronRight, LayoutGrid, Trash2, ArrowLeft, CupSoda, List as ListIcon, Grid as GridIcon, ArrowDownAZ, ArrowUpZA, Clock, Ruler, RefreshCcw } from 'lucide-react';
 import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { ProductForm } from './components/ProductForm';
@@ -87,6 +87,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastOpenedRef = useRef<number>(0);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const hasAttemptedSyncRef = useRef(false);
+
   const showToast = (message: string, duration = 3000) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), duration);
@@ -113,11 +116,25 @@ export default function App() {
       }
     };
 
-    const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
-      // Prioritize Firestore products. Manual sync is available in Admin Panel.
+    const unsubscribeProducts = subscribeToProducts(async (updatedProducts) => {
       const validProducts = (updatedProducts || []).filter(p => p && typeof p === 'object');
       setProducts(validProducts);
       setIsLoaded(true);
+
+      // Auto-seed if empty and we haven't tried yet
+      if (validProducts.length === 0 && !hasAttemptedSyncRef.current) {
+        hasAttemptedSyncRef.current = true;
+        console.log('Database is empty, attempting to seed from external URL or defaults...');
+        
+        const external = await fetchExternalProducts();
+        if (external.length > 0) {
+          console.log(`Seeding ${external.length} products from external URL`);
+          await saveProducts(external);
+        } else {
+          console.log(`Seeding from DEFAULT_PRODUCTS`);
+          await saveProducts(DEFAULT_PRODUCTS);
+        }
+      }
     });
 
     const unsubscribeLogo = subscribeToLogo((logo) => {
@@ -298,6 +315,7 @@ export default function App() {
       return;
     }
 
+    setIsSyncing(true);
     showToast('Sincronizando catálogo desde GitHub...');
     try {
       const response = await fetch(EXTERNAL_PRODUCTS_URL);
@@ -305,20 +323,22 @@ export default function App() {
       
       const importedProducts = await response.json();
       if (Array.isArray(importedProducts)) {
-        // We clear existing products to avoid mess, or merge? 
-        // User wants the "complete" file, so let's ask or just merge.
-        // For a "Sync", usually we want to replace or merge.
-        // Let's merge but prioritize the external ones.
+        // Ensure all products have an ID
+        const productsWithIds = importedProducts.map((p, i) => ({
+          ...p,
+          id: p.id || `ext-${Date.now()}-${i}`
+        }));
         
-        // To be safe and clean, we'll save them all to Firestore
-        await saveProducts(importedProducts);
-        showToast(`Sincronización completada: ${importedProducts.length} productos`);
+        await saveProducts(productsWithIds);
+        showToast(`Sincronización completada: ${productsWithIds.length} productos`);
       } else {
         showToast('El formato del archivo no es válido');
       }
     } catch (err) {
       console.error('Sync error:', err);
       showToast('Error en la sincronización. Verifica el enlace.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -326,9 +346,15 @@ export default function App() {
     try {
       const importedProducts = JSON.parse(jsonStr);
       if (Array.isArray(importedProducts)) {
+        // Ensure all products have an ID
+        const productsWithIds = importedProducts.map((p, i) => ({
+          ...p,
+          id: p.id || `paste-${Date.now()}-${i}`
+        }));
+
         showToast('Guardando catálogo en la base de datos...');
-        saveProducts(importedProducts).then(() => {
-          showToast(`Importados ${importedProducts.length} productos correctamente`);
+        saveProducts(productsWithIds).then(() => {
+          showToast(`Importados ${productsWithIds.length} productos correctamente`);
           setIsPasteModalOpen(false);
         }).catch(err => {
           showToast('Error al guardar en la base de datos');
@@ -931,147 +957,147 @@ export default function App() {
         {/* Scrollable Grid Area */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-10 no-scrollbar">
           <div className="max-w-7xl mx-auto">
-            <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-              <div>
-                <h2 className="text-3xl font-bold tracking-tight text-black">
-                  {selectedCategory ? CATEGORIES.find(c => c.id === selectedCategory)?.name : 'Catálogo'}
-                </h2>
-                <p className="text-[15px] text-slate-500 mt-1 font-medium">
-                  {filteredProducts.length} productos profesionales
-                  {isAdminMode && ' • Arrastra para recategorizar'}
+            {filteredProducts.length === 0 && isLoaded ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-6">
+                  <Search size={40} />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">No se encontraron productos</h3>
+                <p className="text-slate-500 max-w-xs mx-auto mb-8">
+                  {searchQuery ? 'Prueba con otros términos de búsqueda o categoría.' : 'El catálogo parece estar vacío en este momento.'}
                 </p>
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-                {/* Sort Toggle */}
-                <div className="flex bg-white rounded-xl shadow-sm border border-black/5 p-1">
+                {!searchQuery && (
                   <button
-                    onClick={() => setSortMode('az')}
-                    className={`p-2 rounded-lg transition-colors ${sortMode === 'az' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Ordenar A-Z"
+                    onClick={handleSyncFromExternal}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
                   >
-                    <ArrowDownAZ size={18} />
-                  </button>
-                  <button
-                    onClick={() => setSortMode('za')}
-                    className={`p-2 rounded-lg transition-colors ${sortMode === 'za' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Ordenar Z-A"
-                  >
-                    <ArrowUpZA size={18} />
-                  </button>
-                  <button
-                    onClick={() => setSortMode('newest')}
-                    className={`p-2 rounded-lg transition-colors ${sortMode === 'newest' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Más recientes"
-                  >
-                    <Clock size={18} />
-                  </button>
-                  {appSection === 'juices' && (
-                    <button
-                      onClick={() => setSortMode('size')}
-                      className={`p-2 rounded-lg transition-colors ${sortMode === 'size' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                      title="Ordenar por tamaño"
-                    >
-                      <Ruler size={18} />
-                    </button>
-                  )}
-                </div>
-
-                {/* View Mode Segmented Control */}
-                <div className="flex bg-[#f2f2f7] p-1 rounded-xl relative w-24">
-                  <motion.div
-                    layoutId="viewModeBg"
-                    className="absolute inset-y-1 bg-white rounded-lg shadow-sm"
-                    initial={false}
-                    animate={{
-                      left: viewMode === 'grid' ? 4 : '50%',
-                      width: 'calc(50% - 4px)'
-                    }}
-                    transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
-                  />
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Vista Cuadrícula"
-                  >
-                    <GridIcon size={18} />
-                  </button>
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Vista Lista"
-                  >
-                    <ListIcon size={18} />
-                  </button>
-                </div>
-
-                {(searchQuery || filterLocal || filterSeasonal || selectedCategory) && (
-                  <button
-                    onClick={() => {
-                      setSearchQuery('');
-                      setSelectedCategory(null);
-                      setFilterLocal(false);
-                      setFilterSeasonal(false);
-                    }}
-                    className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl transition-colors"
-                  >
-                    Ver todos
+                    <RefreshCcw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                    <span>{isSyncing ? 'Sincronizando...' : 'Cargar Catálogo Inicial'}</span>
                   </button>
                 )}
               </div>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {filteredProducts.length > 0 ? (
-                <motion.div 
-                  key={viewMode}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className={viewMode === 'grid' 
-                    ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 md:gap-6"
-                    : "flex flex-col gap-3"
-                  }
-                >
-                  {filteredProducts.map((product) => (
-                    <ProductCard 
-                      key={product.id} 
-                      product={product} 
-                      onClick={setSelectedProduct} 
-                      isAdminMode={isAdminMode && isAdmin}
-                      onDelete={handleDeleteProduct}
-                      onToggleLocal={handleToggleLocal}
-                      onToggleSeasonal={handleToggleSeasonal}
-                      onUpdateCategory={handleUpdateProductCategory}
-                      viewMode={viewMode}
-                    />
-                  ))}
-                </motion.div>
-              ) : (
-                <div className="py-20 text-center bg-white/50 rounded-3xl border border-dashed border-black/10">
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 shadow-sm">
-                    {products.length === 0 ? <LayoutGrid size={32} /> : <Search size={32} />}
+            ) : (
+              <>
+                <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                  <div>
+                    <h2 className="text-3xl font-bold tracking-tight text-black">
+                      {selectedCategory ? CATEGORIES.find(c => c.id === selectedCategory)?.name : 'Catálogo'}
+                    </h2>
+                    <p className="text-[15px] text-slate-500 mt-1 font-medium">
+                      {filteredProducts.length} productos profesionales
+                      {isAdminMode && ' • Arrastra para recategorizar'}
+                    </p>
                   </div>
-                  <h3 className="text-lg font-bold text-black">
-                    {products.length === 0 ? 'Catálogo vacío' : 'Sin resultados'}
-                  </h3>
-                  <p className="text-sm text-slate-400 mt-1 max-w-sm mx-auto">
-                    {products.length === 0 
-                      ? 'Haz 5 clics rápidos en el logo de Bonany (arriba a la izquierda) para subir tus imágenes y crear productos.' 
-                      : 'Intenta con otros filtros o términos de búsqueda.'}
-                  </p>
-                  {products.length > 0 && (
-                    <button 
-                      onClick={() => {setSearchQuery(''); setSelectedCategory(null); setFilterLocal(false); setFilterSeasonal(false);}}
-                      className="mt-6 px-8 py-3 bg-emerald-500 text-white rounded-2xl font-bold text-sm ios-active shadow-md shadow-emerald-500/20"
-                    >
-                      Limpiar filtros
-                    </button>
-                  )}
+                  
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                    {/* Sort Toggle */}
+                    <div className="flex bg-white rounded-xl shadow-sm border border-black/5 p-1">
+                      <button
+                        onClick={() => setSortMode('az')}
+                        className={`p-2 rounded-lg transition-colors ${sortMode === 'az' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Ordenar A-Z"
+                      >
+                        <ArrowDownAZ size={18} />
+                      </button>
+                      <button
+                        onClick={() => setSortMode('za')}
+                        className={`p-2 rounded-lg transition-colors ${sortMode === 'za' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Ordenar Z-A"
+                      >
+                        <ArrowUpZA size={18} />
+                      </button>
+                      <button
+                        onClick={() => setSortMode('newest')}
+                        className={`p-2 rounded-lg transition-colors ${sortMode === 'newest' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Más recientes"
+                      >
+                        <Clock size={18} />
+                      </button>
+                      {appSection === 'juices' && (
+                        <button
+                          onClick={() => setSortMode('size')}
+                          className={`p-2 rounded-lg transition-colors ${sortMode === 'size' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                          title="Ordenar por tamaño"
+                        >
+                          <Ruler size={18} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* View Mode Segmented Control */}
+                    <div className="flex bg-[#f2f2f7] p-1 rounded-xl relative w-24">
+                      <motion.div
+                        layoutId="viewModeBg"
+                        className="absolute inset-y-1 bg-white rounded-lg shadow-sm"
+                        initial={false}
+                        animate={{
+                          left: viewMode === 'grid' ? 4 : '50%',
+                          width: 'calc(50% - 4px)'
+                        }}
+                        transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
+                      />
+                      <button
+                        onClick={() => setViewMode('grid')}
+                        className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Vista Cuadrícula"
+                      >
+                        <GridIcon size={18} />
+                      </button>
+                      <button
+                        onClick={() => setViewMode('list')}
+                        className={`relative z-10 flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Vista Lista"
+                      >
+                        <ListIcon size={18} />
+                      </button>
+                    </div>
+
+                    {(searchQuery || filterLocal || filterSeasonal || selectedCategory) && (
+                      <button
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedCategory(null);
+                          setFilterLocal(false);
+                          setFilterSeasonal(false);
+                        }}
+                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl transition-colors"
+                      >
+                        Ver todos
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
-            </AnimatePresence>
+
+                <AnimatePresence mode="wait">
+                  <motion.div 
+                    key={viewMode}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className={viewMode === 'grid' 
+                      ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 md:gap-6"
+                      : "flex flex-col gap-3"
+                    }
+                  >
+                    {filteredProducts.map((product) => (
+                      <ProductCard 
+                        key={product.id} 
+                        product={product} 
+                        onClick={setSelectedProduct} 
+                        isAdminMode={isAdminMode && isAdmin}
+                        onDelete={handleDeleteProduct}
+                        onToggleLocal={handleToggleLocal}
+                        onToggleSeasonal={handleToggleSeasonal}
+                        onUpdateCategory={handleUpdateProductCategory}
+                        viewMode={viewMode}
+                      />
+                    ))}
+                  </motion.div>
+                </AnimatePresence>
+              </>
+            )}
           </div>
         </div>
       </main>
