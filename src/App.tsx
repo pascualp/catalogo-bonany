@@ -13,8 +13,6 @@ import { AdminPanel } from './components/AdminPanel';
 import { CATEGORIES } from './constants';
 import { Product } from './types';
 import { saveProducts, saveProduct, deleteProduct, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection } from './lib/db';
-import { auth } from './firebase';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -60,8 +58,6 @@ const fileToBase64 = (file: File): Promise<string> => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [customLogo, setCustomLogo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -94,17 +90,9 @@ export default function App() {
 
   useEffect(() => {
     testConnection();
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      console.log("Auth state changed:", currentUser);
-      setUser(currentUser);
-      setIsAuthReady(true);
-    });
-    return () => unsubscribeAuth();
   }, []);
 
   useEffect(() => {
-    if (!isAuthReady) return;
-
     const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
       if (updatedProducts && updatedProducts.length > 0) {
         setProducts(updatedProducts);
@@ -125,34 +113,9 @@ export default function App() {
       unsubscribeProducts();
       unsubscribeLogo();
     };
-  }, [isAuthReady]);
+  }, []);
 
-  const isAdmin = user?.email === 'fruitesbonany20@gmail.com';
-
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      // Ensure the popup is triggered by a direct user action
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      if (error.code === 'auth/popup-closed-by-user') {
-        showToast("Inicio de sesión cancelado por el usuario");
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        // Ignore this error as it happens when multiple login attempts are made
-      } else {
-        console.error("Login error:", error);
-        showToast("Error al iniciar sesión. Por favor, inténtalo de nuevo.");
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
+  const isAdmin = true;
 
   const handleLogoUpdate = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -531,14 +494,6 @@ export default function App() {
     }
   }, [products, selectedProduct]);
 
-  if (!isAuthReady) {
-    return (
-      <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
-      </div>
-    );
-  }
-
   if (appSection === 'home') {
     return (
       <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
@@ -833,18 +788,6 @@ export default function App() {
 
         {/* Sidebar Footer */}
         <div className="p-6 space-y-4">
-          {user && (
-            <div className="p-4 bg-black/5 rounded-2xl">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usuario</p>
-              <p className="text-sm font-bold text-black truncate">{user?.displayName || user?.email}</p>
-              <button 
-                onClick={handleLogout}
-                className="text-[10px] text-rose-500 font-bold uppercase mt-2 hover:underline"
-              >
-                Cerrar Sesión
-              </button>
-            </div>
-          )}
           <div className="p-4 bg-black/5 rounded-2xl">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Comercial</p>
             <p className="text-sm font-bold text-black">Bonany Mallorca</p>
@@ -1070,9 +1013,7 @@ export default function App() {
           setProducts={setProducts}
           showToast={showToast}
           onUpdateLogo={handleLogoUpdate}
-          isLoggedIn={!!user}
           isAdmin={isAdmin}
-          onLogin={handleLogin}
         />
       )}
 

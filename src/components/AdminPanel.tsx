@@ -12,9 +12,7 @@ interface AdminPanelProps {
   setProducts: React.Dispatch<React.SetStateAction<any[]>>;
   showToast: (msg: string) => void;
   onUpdateLogo: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  isLoggedIn: boolean;
   isAdmin: boolean;
-  onLogin: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -27,9 +25,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   setProducts,
   showToast,
   onUpdateLogo,
-  isLoggedIn,
-  isAdmin,
-  onLogin
+  isAdmin
 }) => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -52,18 +48,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh] no-scrollbar">
-          {!isLoggedIn ? (
-            <div className="text-center py-8">
-              <p className="text-slate-500 mb-6">Inicia sesión para gestionar el catálogo</p>
-              <button 
-                onClick={onLogin}
-                className="bg-white px-8 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all border border-black/5 flex items-center gap-3 font-bold text-slate-700 mx-auto"
-              >
-                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-                Continuar con Google
-              </button>
-            </div>
-          ) : !isAdmin ? (
+          {!isAdmin ? (
             <div className="text-center py-8">
               <p className="text-rose-500 font-bold mb-2">Acceso Denegado</p>
               <p className="text-slate-500 text-sm">No tienes permisos de administrador.</p>
