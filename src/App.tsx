@@ -95,6 +95,7 @@ export default function App() {
   useEffect(() => {
     testConnection();
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      console.log("Auth state changed:", currentUser);
       setUser(currentUser);
       setIsAuthReady(true);
     });
@@ -557,7 +558,7 @@ export default function App() {
            <div id="home-fallback-logo" className="w-20 h-20 bg-emerald-500 rounded-3xl hidden items-center justify-center text-white shadow-lg mx-auto mb-6">
              <Leaf size={40} />
            </div>
-           <h1 id="home-fallback-text" className="text-4xl font-bold tracking-tight text-slate-900 mb-2 hidden">Bonany</h1>
+           <h1 id="home-fallback-text" className="text-4xl font-bold tracking-tight text-slate-900 mb-2 hidden">Bonany - Catálogo Público</h1>
            <p className="text-lg text-slate-500">Selecciona el catálogo a presentar</p>
         </div>
         
