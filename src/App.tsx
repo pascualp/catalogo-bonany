@@ -99,33 +99,21 @@ export default function App() {
       if (!EXTERNAL_PRODUCTS_URL) return [];
       try {
         const response = await fetch(EXTERNAL_PRODUCTS_URL);
-        if (!response.ok) throw new Error('Failed to fetch');
-        return await response.json();
+        if (!response.ok) {
+          console.warn(`External products fetch failed with status: ${response.status}`);
+          return [];
+        }
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
       } catch (e) {
         console.error('Error fetching external products:', e);
         return [];
       }
     };
 
-    const unsubscribeProducts = subscribeToProducts(async (updatedProducts) => {
-      const externalProducts = await fetchExternalProducts();
-      
-      const safeExternalProducts = Array.isArray(externalProducts) ? externalProducts : [];
-      const allProducts = [...safeExternalProducts];
-      const seenIds = new Set(allProducts.map(p => p?.id).filter(Boolean));
-      
-      if (updatedProducts) {
-        updatedProducts.forEach(p => {
-          if (p && p.id && !seenIds.has(p.id)) {
-            allProducts.push(p);
-            seenIds.add(p.id);
-          }
-        });
-      }
-      
-      // Filter out any null/undefined products that might have come from external JSON
-      const validProducts = allProducts.filter(p => p && typeof p === 'object');
-      
+    const unsubscribeProducts = subscribeToProducts((updatedProducts) => {
+      // Prioritize Firestore products. Manual sync is available in Admin Panel.
+      const validProducts = (updatedProducts || []).filter(p => p && typeof p === 'object');
       setProducts(validProducts);
       setIsLoaded(true);
     });
@@ -249,6 +237,19 @@ export default function App() {
     }
   };
 
+  const handleClearAll = async () => {
+    if (window.confirm('¿ESTÁS SEGURO? Esto borrará permanentemente TODOS los productos de la base de datos. Esta acción no se puede deshacer.')) {
+      showToast('Borrando catálogo...');
+      try {
+        const promises = products.map(p => deleteProduct(p.id));
+        await Promise.all(promises);
+        showToast('Catálogo borrado correctamente');
+      } catch (error) {
+        showToast('Error al borrar el catálogo');
+      }
+    }
+  };
+
   const handleRemoveDuplicates = async () => {
     const unique: Product[] = [];
     const seen = new Set<string>();
@@ -287,6 +288,56 @@ export default function App() {
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
     showToast('Copia de seguridad descargada');
+  };
+
+  const handleSyncFromExternal = async () => {
+    if (!EXTERNAL_PRODUCTS_URL) {
+      showToast('No hay URL externa configurada');
+      return;
+    }
+
+    showToast('Sincronizando catálogo desde GitHub...');
+    try {
+      const response = await fetch(EXTERNAL_PRODUCTS_URL);
+      if (!response.ok) throw new Error('Error al descargar el archivo');
+      
+      const importedProducts = await response.json();
+      if (Array.isArray(importedProducts)) {
+        // We clear existing products to avoid mess, or merge? 
+        // User wants the "complete" file, so let's ask or just merge.
+        // For a "Sync", usually we want to replace or merge.
+        // Let's merge but prioritize the external ones.
+        
+        // To be safe and clean, we'll save them all to Firestore
+        await saveProducts(importedProducts);
+        showToast(`Sincronización completada: ${importedProducts.length} productos`);
+      } else {
+        showToast('El formato del archivo no es válido');
+      }
+    } catch (err) {
+      console.error('Sync error:', err);
+      showToast('Error en la sincronización. Verifica el enlace.');
+    }
+  };
+
+  const handlePasteJson = () => {
+    const jsonStr = window.prompt('Pega aquí el contenido JSON de tu catálogo completo:');
+    if (!jsonStr) return;
+
+    try {
+      const importedProducts = JSON.parse(jsonStr);
+      if (Array.isArray(importedProducts)) {
+        saveProducts(importedProducts).then(() => {
+          showToast(`Importados ${importedProducts.length} productos correctamente`);
+        }).catch(err => {
+          showToast('Error al guardar en la base de datos');
+        });
+      } else {
+        showToast('El JSON debe ser una lista [] de productos');
+      }
+    } catch (err) {
+      showToast('Error al procesar el JSON. Asegúrate de que el formato es correcto.');
+    }
   };
 
   const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1037,10 +1088,13 @@ export default function App() {
           onImport={handleImportData}
           onRestoreDefaults={handleRestoreDefaults}
           onRemoveDuplicates={handleRemoveDuplicates}
+          onClearAll={handleClearAll}
           onAddManual={() => {
             setIsAdminPanelOpen(false);
             setIsAddingProduct(true);
           }}
+          onSyncFromExternal={handleSyncFromExternal}
+          onPasteJson={handlePasteJson}
           onClose={() => setIsAdminPanelOpen(false)}
           setProducts={setProducts}
           showToast={showToast}

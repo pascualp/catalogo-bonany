@@ -80,12 +80,20 @@ export const testConnection = async () => {
 
 export const saveProducts = async (products: Product[]): Promise<void> => {
   try {
-    // In Firestore, we usually save individually or in batches.
-    // For simplicity, we'll save each product.
-    const promises = products.map(product => 
-      setDoc(doc(db, PRODUCTS_COLLECTION, product.id), product)
-    );
-    await Promise.all(promises);
+    // Firestore has a limit of 500 operations per batch.
+    // We'll process in chunks of 400 to be safe.
+    const chunkSize = 400;
+    for (let i = 0; i < products.length; i += chunkSize) {
+      const chunk = products.slice(i, i + chunkSize);
+      const promises = chunk.map(product => {
+        const docId = String(product.id);
+        return setDoc(doc(db, PRODUCTS_COLLECTION, docId), {
+          ...product,
+          id: docId
+        });
+      });
+      await Promise.all(promises);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, PRODUCTS_COLLECTION);
   }
@@ -93,7 +101,11 @@ export const saveProducts = async (products: Product[]): Promise<void> => {
 
 export const saveProduct = async (product: Product): Promise<void> => {
   try {
-    await setDoc(doc(db, PRODUCTS_COLLECTION, product.id), product);
+    const docId = String(product.id);
+    await setDoc(doc(db, PRODUCTS_COLLECTION, docId), {
+      ...product,
+      id: docId
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${PRODUCTS_COLLECTION}/${product.id}`);
   }

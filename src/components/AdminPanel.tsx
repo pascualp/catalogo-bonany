@@ -7,7 +7,10 @@ interface AdminPanelProps {
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRestoreDefaults: () => void;
   onRemoveDuplicates: () => void;
+  onClearAll: () => void;
   onAddManual: () => void;
+  onSyncFromExternal: () => void;
+  onPasteJson: () => void;
   onClose: () => void;
   setProducts: React.Dispatch<React.SetStateAction<any[]>>;
   showToast: (msg: string) => void;
@@ -20,7 +23,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onImport,
   onRestoreDefaults,
   onRemoveDuplicates,
+  onClearAll,
   onAddManual,
+  onSyncFromExternal,
+  onPasteJson,
   onClose,
   setProducts,
   showToast,
@@ -86,6 +92,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="text-left">
                     <p className="text-sm font-bold">Añadir Manualmente</p>
                     <p className="text-[10px] opacity-70">Crea un producto paso a paso</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={onSyncFromExternal}
+                  className="flex items-center gap-3 p-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-2xl transition-all border border-indigo-100 group ios-active"
+                >
+                  <div className="p-2 bg-indigo-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <RefreshCcw size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Sincronizar GitHub</p>
+                    <p className="text-[10px] opacity-70">Carga el catálogo desde el enlace externo</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={onPasteJson}
+                  className="flex items-center gap-3 p-4 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-2xl transition-all border border-cyan-100 group ios-active"
+                >
+                  <div className="p-2 bg-cyan-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Plus size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Pegar Catálogo JSON</p>
+                    <p className="text-[10px] opacity-70">Pega el contenido del archivo directamente</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={onClearAll}
+                  className="flex items-center gap-3 p-4 bg-red-50 hover:bg-red-100 text-red-700 rounded-2xl transition-all border border-red-100 group ios-active"
+                >
+                  <div className="p-2 bg-red-500 text-white rounded-xl group-hover:scale-110 transition-transform">
+                    <Trash2 size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold">Borrar Catálogo Completo</p>
+                    <p className="text-[10px] opacity-70">Limpia la base de datos para una carga nueva</p>
                   </div>
                 </button>
 
