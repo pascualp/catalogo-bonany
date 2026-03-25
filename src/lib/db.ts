@@ -82,8 +82,8 @@ export const testConnection = async () => {
 export const saveProducts = async (products: Product[]): Promise<void> => {
   try {
     // Firestore has a limit of 500 operations per batch.
-    // We'll process in chunks of 100 to be conservative and avoid exhausting the write stream.
-    const chunkSize = 100;
+    // We'll process in chunks of 25 to be conservative and avoid exhausting the write stream.
+    const chunkSize = 25;
     for (let i = 0; i < products.length; i += chunkSize) {
       const chunk = products.slice(i, i + chunkSize);
       const batch = writeBatch(db);
@@ -99,9 +99,9 @@ export const saveProducts = async (products: Product[]): Promise<void> => {
       
       await batch.commit();
       
-      // Small delay to prevent overloading the SDK's write stream
+      // Delay to prevent overloading the SDK's write stream
       if (i + chunkSize < products.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   } catch (error) {
@@ -111,7 +111,7 @@ export const saveProducts = async (products: Product[]): Promise<void> => {
 
 export const deleteProducts = async (productIds: string[]): Promise<void> => {
   try {
-    const chunkSize = 100;
+    const chunkSize = 25;
     for (let i = 0; i < productIds.length; i += chunkSize) {
       const chunk = productIds.slice(i, i + chunkSize);
       const batch = writeBatch(db);
@@ -124,7 +124,7 @@ export const deleteProducts = async (productIds: string[]): Promise<void> => {
       await batch.commit();
       
       if (i + chunkSize < productIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   } catch (error) {
