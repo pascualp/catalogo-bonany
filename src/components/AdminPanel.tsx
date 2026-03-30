@@ -37,6 +37,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const importInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const optimizeInputRef = useRef<HTMLInputElement>(null);
+  const batchImagesInputRef = useRef<HTMLInputElement>(null);
   const [cloudinaryCloudName, setCloudinaryCloudName] = useState('');
   const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState('');
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -256,6 +257,70 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     } finally {
       setIsOptimizing(false);
     }
+  };
+
+  const uploadMultipleImages = async (files: FileList) => {
+    if (!cloudinaryCloudName || !cloudinaryUploadPreset) {
+      showToast('Configura Cloudinary primero');
+      return;
+    }
+
+    setIsOptimizing(true);
+    setOptimizationProgress(0);
+    
+    const fileArray = Array.from(files);
+    const total = fileArray.length;
+    let completedCount = 0;
+
+    const newProducts = await Promise.all(fileArray.map(async (file, index) => {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', cloudinaryUploadPreset);
+        
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (res.ok) {
+          const cloudData = await res.json();
+          
+          // Create a basic product from the image
+          const product = {
+            id: `img-${Date.now()}-${index}`,
+            code: file.name.split('.')[0].substring(0, 10),
+            name: file.name.split('.')[0].replace(/[-_]/g, ' ').toUpperCase(),
+            category: 'otros',
+            image: cloudData.secure_url,
+            price: 0,
+            rating: 5,
+            description: `Producto añadido desde imagen: ${file.name}`,
+            isLocal: false,
+            isSeasonal: true
+          };
+
+          completedCount++;
+          if (completedCount % 5 === 0 || completedCount === total) {
+            setOptimizationProgress(Math.round((completedCount / total) * 100));
+          }
+          return product;
+        }
+      } catch (e) {
+        console.error('Error uploading file:', file.name, e);
+      }
+      completedCount++;
+      return null;
+    }));
+
+    const validProducts = (newProducts.filter(p => p !== null) as any[]);
+    if (validProducts.length > 0) {
+      setProducts(prev => [...prev, ...validProducts]);
+      showToast(`¡${validProducts.length} imágenes subidas y añadidas!`);
+    } else {
+      showToast('No se pudo subir ninguna imagen');
+    }
+    setIsOptimizing(false);
   };
 
   return (
@@ -500,6 +565,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </>
                   )}
                 </button>
+
+                {optimizationMode === 'cloudinary' && (
+                  <>
+                    <input
+                      type="file"
+                      ref={batchImagesInputRef}
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) uploadMultipleImages(files);
+                      }}
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => batchImagesInputRef.current?.click()}
+                      disabled={isOptimizing}
+                      className="w-full flex items-center justify-center gap-3 p-4 bg-white border-2 border-dashed border-cyan-200 text-cyan-600 rounded-2xl hover:bg-cyan-50 transition-all group disabled:opacity-50"
+                    >
+                      <ImageIcon size={20} className="group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-sm">Subir Carpeta de Imágenes (Lote)</span>
+                    </button>
+                  </>
+                )}
                 <p className="text-[10px] text-slate-400 text-center px-4 leading-tight">
                   {optimizationMode === 'local' 
                     ? 'Mantiene el formato PNG si es necesario, pero el archivo JSON puede ser muy grande si tienes muchos productos.' 
