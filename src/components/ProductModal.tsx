@@ -56,15 +56,23 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </button>
 
             {/* Image Section */}
-            <div className="w-full md:w-1/2 h-64 md:h-auto bg-white relative p-4">
+            <div className="w-full md:w-1/2 h-64 md:h-auto bg-slate-50 relative overflow-hidden flex items-center justify-center p-8">
+              {/* Blurred Background for premium feel */}
+              <div 
+                className="absolute inset-0 opacity-40 blur-3xl scale-125 bg-center bg-cover transition-all duration-500"
+                style={{ backgroundImage: `url(${imgSrc})` }}
+              />
+              
+              {/* Main Image */}
               <img
                 src={imgSrc || undefined}
                 alt={product.name}
-                className="w-full h-full object-contain"
+                className="relative z-10 w-full h-full object-scale-down drop-shadow-2xl transition-transform duration-500 hover:scale-105"
                 referrerPolicy="no-referrer"
                 onError={() => setImgError(true)}
               />
-              <div className="absolute top-6 left-6 flex flex-col gap-2">
+              
+              <div className="absolute top-6 left-6 flex flex-col gap-2 z-20">
                 {product.isLocal && (
                   <div className="bg-emerald-500/90 backdrop-blur-md text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-sm flex items-center gap-1.5">
                     <MapPin size={12} />
