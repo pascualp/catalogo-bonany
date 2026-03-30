@@ -767,9 +767,9 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#f2f2f7] text-black overflow-hidden relative font-sans">
       {/* Quota Warning Banner */}
       {getIsQuotaExceeded() && (
-        <div className="bg-amber-500 text-white text-[10px] font-bold py-1 px-4 text-center sticky top-0 z-[100] flex items-center justify-center gap-2">
+        <div className="bg-amber-600 text-white text-[10px] font-bold py-1.5 px-4 text-center sticky top-0 z-[100] flex items-center justify-center gap-2 shadow-md">
           <RefreshCcw size={12} className="animate-spin" />
-          <span>MODO OFFLINE: Límite de Firebase alcanzado. Usando catálogo de respaldo.</span>
+          <span>Límite diario de base de datos alcanzado. Tus cambios se guardarán localmente y se sincronizarán mañana.</span>
         </div>
       )}
 

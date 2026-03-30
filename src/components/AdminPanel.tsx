@@ -51,6 +51,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (settings) {
         setCloudinaryCloudName(settings.cloudinaryCloudName || '');
         setCloudinaryUploadPreset(settings.cloudinaryUploadPreset || '');
+        if (settings.optimizationMode) {
+          setOptimizationMode(settings.optimizationMode);
+        }
       }
     });
   }, []);
@@ -60,7 +63,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       await saveSettings({
         cloudinaryCloudName,
         cloudinaryUploadPreset,
-        useCloudinary: !!(cloudinaryCloudName && cloudinaryUploadPreset)
+        useCloudinary: !!(cloudinaryCloudName && cloudinaryUploadPreset),
+        optimizationMode
       });
       showToast('Configuración de Cloudinary guardada');
     } catch (error) {
@@ -523,13 +527,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="pt-4 space-y-3">
                 <div className="flex bg-slate-100 p-1 rounded-xl">
                   <button 
-                    onClick={() => setOptimizationMode('local')}
+                    onClick={() => {
+                      setOptimizationMode('local');
+                      saveSettings({ optimizationMode: 'local' });
+                    }}
                     className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${optimizationMode === 'local' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
                   >
                     Compresión Local
                   </button>
                   <button 
-                    onClick={() => setOptimizationMode('cloudinary')}
+                    onClick={() => {
+                      setOptimizationMode('cloudinary');
+                      saveSettings({ optimizationMode: 'cloudinary' });
+                    }}
                     className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${optimizationMode === 'cloudinary' ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500'}`}
                   >
                     Nube (Cloudinary)

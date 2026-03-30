@@ -199,37 +199,73 @@ export interface GlobalSettings {
   cloudinaryCloudName?: string;
   cloudinaryUploadPreset?: string;
   useCloudinary?: boolean;
+  optimizationMode?: 'cloudinary' | 'local';
 }
 
 export const saveSettings = async (settings: Partial<GlobalSettings>): Promise<void> => {
   try {
+    // Save to localStorage first as a reliable local fallback
+    const currentLocal = localStorage.getItem('fruites_bonany_settings');
+    const existing = currentLocal ? JSON.parse(currentLocal) : {};
+    const updated = { ...existing, ...settings };
+    localStorage.setItem('fruites_bonany_settings', JSON.stringify(updated));
+
+    // Then try to save to Firestore
     await setDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), settings, { merge: true });
   } catch (error) {
+    // If it's a quota error, we don't throw because we already saved to localStorage
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('Quota limit exceeded') || errorMessage.includes('resource-exhausted')) {
+      isQuotaExceededGlobal = true;
+      return;
+    }
     handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
   }
 };
 
 export const loadSettings = async (): Promise<GlobalSettings | null> => {
   try {
+    // Try Firestore first
     const docSnap = await getDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC));
     if (docSnap.exists()) {
-      return docSnap.data() as GlobalSettings;
+      const data = docSnap.data() as GlobalSettings;
+      // Sync to localStorage
+      localStorage.setItem('fruites_bonany_settings', JSON.stringify(data));
+      return data;
     }
-    return null;
+    
+    // If not in Firestore, try localStorage
+    const localData = localStorage.getItem('fruites_bonany_settings');
+    return localData ? JSON.parse(localData) : null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
-    return null;
+    // On error (like quota or offline), fallback to localStorage
+    const localData = localStorage.getItem('fruites_bonany_settings');
+    return localData ? JSON.parse(localData) : null;
   }
 };
 
 export const subscribeToSettings = (callback: (settings: GlobalSettings | null) => void) => {
+  // Provide initial data from localStorage for immediate availability
+  const localData = localStorage.getItem('fruites_bonany_settings');
+  if (localData) {
+    callback(JSON.parse(localData));
+  }
+
   return onSnapshot(doc(db, SETTINGS_COLLECTION, GLOBAL_SETTINGS_DOC), (docSnap) => {
     if (docSnap.exists()) {
-      callback(docSnap.data() as GlobalSettings);
-    } else {
+      const data = docSnap.data() as GlobalSettings;
+      localStorage.setItem('fruites_bonany_settings', JSON.stringify(data));
+      callback(data);
+    } else if (!localData) {
       callback(null);
     }
   }, (error) => {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('Quota limit exceeded') || errorMessage.includes('resource-exhausted')) {
+      isQuotaExceededGlobal = true;
+      // Already provided localData above, so we just stop here
+      return;
+    }
     handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${GLOBAL_SETTINGS_DOC}`);
   });
 };
