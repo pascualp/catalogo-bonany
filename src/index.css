@@ -65,6 +65,15 @@ button, a, input {
   scrollbar-width: none;
 }
 
+/* Mejora de nitidez para imágenes */
+img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
 /* iOS Active State */
 .ios-active:active {
   opacity: 0.7;

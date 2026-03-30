@@ -27,8 +27,8 @@ const fileToBase64 = (file: File): Promise<string> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800;
-        const MAX_HEIGHT = 800;
+        const MAX_WIDTH = 2400;
+        const MAX_HEIGHT = 2400;
         let width = img.width;
         let height = img.height;
 
@@ -48,12 +48,14 @@ const fileToBase64 = (file: File): Promise<string> => {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
           // If it's PNG, we keep it as PNG to maintain transparency and quality
           // Otherwise use JPEG for better compression
           const dataUrl = isPng 
             ? canvas.toDataURL('image/png') 
-            : canvas.toDataURL('image/jpeg', 0.8);
+            : canvas.toDataURL('image/jpeg', 0.95);
           resolve(dataUrl);
         } else {
           resolve(event.target?.result as string);
@@ -1244,6 +1246,7 @@ export default function App() {
             setIsPasteModalOpen(true);
           }}
           onClose={() => setIsAdminPanelOpen(false)}
+          products={products}
           setProducts={setProducts}
           showToast={showToast}
           onUpdateLogo={handleLogoUpdate}

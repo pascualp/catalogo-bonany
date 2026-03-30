@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Download, Upload, RefreshCcw, Trash2, Plus, ShieldCheck, X, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { Download, Upload, RefreshCcw, Trash2, Plus, ShieldCheck, X, Image as ImageIcon, Sparkles, Shield } from 'lucide-react';
 import { saveSettings, loadSettings, getIsQuotaExceeded } from '../lib/db';
 
 interface AdminPanelProps {
@@ -13,6 +13,7 @@ interface AdminPanelProps {
   onSyncFromExternal: () => void;
   onPasteJson: () => void;
   onClose: () => void;
+  products: any[];
   setProducts: React.Dispatch<React.SetStateAction<any[]>>;
   showToast: (msg: string) => void;
   onUpdateLogo: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -29,6 +30,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onSyncFromExternal,
   onPasteJson,
   onClose,
+  products,
   setProducts,
   showToast,
   onUpdateLogo,
@@ -46,6 +48,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const [showCloudinaryGuide, setShowCloudinaryGuide] = useState(false);
 
+  const [hasLocalImages, setHasLocalImages] = useState(false);
+
+  React.useEffect(() => {
+    const localCount = products.filter(p => p.image && p.image.startsWith('data:image')).length;
+    setHasLocalImages(localCount > 0);
+  }, [products]);
+
   React.useEffect(() => {
     loadSettings().then(settings => {
       if (settings) {
@@ -57,6 +66,116 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     });
   }, []);
+
+  const [isAutoImproving, setIsAutoImproving] = useState(false);
+
+  const autoImproveCatalog = async () => {
+    if (isOptimizing || isAutoImproving) return;
+    
+    const productsToImprove = products.filter(p => p.image && p.image.startsWith('data:image'));
+    
+    if (productsToImprove.length === 0) {
+      showToast('No hay imágenes locales para mejorar. ¡Todo está optimizado!');
+      return;
+    }
+
+    if (optimizationMode === 'cloudinary' && (!cloudinaryCloudName || !cloudinaryUploadPreset)) {
+      showToast('Configura Cloudinary primero para mejorar la calidad en la nube.');
+      return;
+    }
+
+    setIsAutoImproving(true);
+    setOptimizationProgress(0);
+    
+    let improvedCount = 0;
+    const total = productsToImprove.length;
+    let currentProducts = [...products];
+
+    showToast(`Iniciando mejora de ${total} productos...`);
+
+    for (let i = 0; i < productsToImprove.length; i++) {
+      if (!isAutoImproving) break;
+
+      const p = productsToImprove[i];
+      const indexInMainList = currentProducts.findIndex(item => item.id === p.id);
+      
+      if (indexInMainList === -1) continue;
+
+      let imageUrl = p.image;
+
+      try {
+        if (optimizationMode === 'cloudinary') {
+          const formData = new FormData();
+          formData.append('file', imageUrl);
+          formData.append('upload_preset', cloudinaryUploadPreset);
+          
+          const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            imageUrl = data.secure_url;
+          } else {
+            const errorData = await res.json();
+            console.error('Cloudinary error:', errorData);
+            // If it's a rate limit or similar, wait longer
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+          // Respect API limits - 800ms between calls is safer for free tier
+          await new Promise(resolve => setTimeout(resolve, 800));
+        } else {
+          // Local re-processing with new high-quality settings
+          const isPng = imageUrl.startsWith('data:image/png');
+          imageUrl = await new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous"; // Try to avoid CORS issues if any
+            img.src = imageUrl;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const size = 1600;
+              let width = img.width;
+              let height = img.height;
+              if (width > height) {
+                if (width > size) { height *= size / width; width = size; }
+              } else {
+                if (height > size) { width *= size / height; height = size; }
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, width, height);
+                const format = isPng ? 'image/png' : 'image/jpeg';
+                const quality = isPng ? undefined : 0.95;
+                resolve(canvas.toDataURL(format, quality));
+              } else { resolve(imageUrl); }
+            };
+            img.onerror = () => resolve(imageUrl);
+          });
+        }
+
+        currentProducts[indexInMainList] = { ...currentProducts[indexInMainList], image: imageUrl };
+        improvedCount++;
+        
+        const progress = Math.round((improvedCount / total) * 100);
+        setOptimizationProgress(progress);
+        
+        // Update state every 3 items to show progress in UI without freezing
+        if (improvedCount % 3 === 0 || improvedCount === total) {
+          setProducts([...currentProducts]);
+        }
+      } catch (e) {
+        console.error('Error en auto-mejora:', e);
+      }
+    }
+
+    setIsAutoImproving(false);
+    showToast(`¡Mejora completada! ${improvedCount} productos actualizados.`);
+  };
 
   const handleSaveCloudinary = async () => {
     try {
@@ -200,7 +319,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 img.src = imageUrl;
                 img.onload = () => {
                   const canvas = document.createElement('canvas');
-                  const size = 600;
+                  const size = optimizationMode === 'cloudinary' ? 2400 : 1600;
                   let width = img.width;
                   let height = img.height;
                   if (width > height) {
@@ -216,7 +335,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     ctx.imageSmoothingQuality = 'high';
                     ctx.drawImage(img, 0, 0, width, height);
                     const format = isPng ? 'image/png' : 'image/jpeg';
-                    const quality = isPng ? undefined : 0.8;
+                    const quality = isPng ? undefined : (optimizationMode === 'cloudinary' ? 0.95 : 0.85);
                     resolve(canvas.toDataURL(format, quality));
                   } else { resolve(imageUrl); }
                 };
@@ -290,16 +409,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (res.ok) {
           const cloudData = await res.json();
           
+          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+          const codeMatch = nameWithoutExt.match(/^(\d+)/);
+          const code = codeMatch ? codeMatch[1] : '';
+          let cleanName = nameWithoutExt;
+          if (code) cleanName = cleanName.substring(code.length);
+          cleanName = cleanName.replace(/^[-_\s]+/, '').replace(/[-_]/g, ' ').trim().toUpperCase();
+
           // Create a basic product from the image
           const product = {
             id: `img-${Date.now()}-${index}`,
-            code: file.name.split('.')[0].substring(0, 10),
-            name: file.name.split('.')[0].replace(/[-_]/g, ' ').toUpperCase(),
+            code: code || file.name.split('.')[0].substring(0, 10),
+            name: cleanName || file.name.split('.')[0].replace(/[-_]/g, ' ').toUpperCase(),
             category: 'otros',
             image: cloudData.secure_url,
             price: 0,
             rating: 5,
-            description: `Producto añadido desde imagen: ${file.name}`,
+            description: `Producto actualizado/añadido desde imagen: ${file.name}`,
             isLocal: false,
             isSeasonal: true
           };
@@ -319,8 +445,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     const validProducts = (newProducts.filter(p => p !== null) as any[]);
     if (validProducts.length > 0) {
-      setProducts(prev => [...prev, ...validProducts]);
-      showToast(`¡${validProducts.length} imágenes subidas y añadidas!`);
+      setProducts(prev => {
+        const updatedList = [...prev];
+        validProducts.forEach(newP => {
+          const existingIndex = updatedList.findIndex(p => 
+            (p.code && newP.code && p.code === newP.code) || 
+            (p.name.toLowerCase().trim() === newP.name.toLowerCase().trim())
+          );
+          
+          if (existingIndex !== -1) {
+            // Update existing product with new high-quality image
+            updatedList[existingIndex] = {
+              ...updatedList[existingIndex],
+              image: newP.image,
+              description: updatedList[existingIndex].description || newP.description
+            };
+          } else {
+            // Add as new
+            updatedList.push(newP);
+          }
+        });
+        return updatedList;
+      });
+      showToast(`¡${validProducts.length} imágenes procesadas! El catálogo se ha actualizado con la nueva calidad.`);
     } else {
       showToast('No se pudo subir ninguna imagen');
     }
@@ -578,6 +725,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                 {optimizationMode === 'cloudinary' && (
                   <>
+                    <div className="mx-4 p-4 bg-blue-50 rounded-2xl border border-blue-100 flex items-start gap-3">
+                      <div className="p-2 bg-blue-100 rounded-xl text-blue-600">
+                        <Shield size={16} />
+                      </div>
+                      <div>
+                        <h4 className="text-[11px] font-bold text-blue-900 mb-1">¿Cómo mejorar fotos ya subidas?</h4>
+                        <p className="text-[10px] text-blue-700 leading-relaxed">
+                          Para mejorar la calidad de productos existentes, selecciona de nuevo las fotos originales. 
+                          <strong> El sistema detectará el nombre/código y actualizará la imagen a alta resolución automáticamente</strong> sin duplicar el producto.
+                        </p>
+                      </div>
+                    </div>
                     <input
                       type="file"
                       ref={batchImagesInputRef}
@@ -591,7 +750,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                     <button
                       onClick={() => batchImagesInputRef.current?.click()}
-                      disabled={isOptimizing}
+                      disabled={isOptimizing || isAutoImproving}
                       className="w-full flex items-center justify-center gap-3 p-4 bg-white border-2 border-dashed border-cyan-200 text-cyan-600 rounded-2xl hover:bg-cyan-50 transition-all group disabled:opacity-50"
                     >
                       <ImageIcon size={20} className="group-hover:scale-110 transition-transform" />
@@ -599,6 +758,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </button>
                   </>
                 )}
+
+                {hasLocalImages && !isAutoImproving && (
+                  <div className="mx-4 p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-start gap-3 animate-pulse">
+                    <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600">
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-[11px] font-bold text-indigo-900 mb-1">Mejora de Calidad Disponible</h4>
+                      <p className="text-[10px] text-indigo-700 leading-relaxed">
+                        Se han detectado imágenes en baja resolución. Pulsa el botón de abajo para <strong>mejorar todo el catálogo automáticamente</strong>.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={isAutoImproving ? () => setIsAutoImproving(false) : autoImproveCatalog}
+                  disabled={isOptimizing}
+                  className={`w-full flex items-center justify-center gap-3 p-4 text-white rounded-2xl shadow-lg transition-all group disabled:opacity-50 ${isAutoImproving ? 'bg-red-500 shadow-red-200' : 'bg-gradient-to-r from-indigo-500 to-purple-600 shadow-indigo-200'}`}
+                >
+                  {isAutoImproving ? (
+                    <div className="flex items-center gap-2">
+                      <X size={20} />
+                      <span className="font-bold">Detener Mejora: {optimizationProgress}%</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Sparkles size={20} className="group-hover:rotate-12 transition-transform" />
+                      <span className="font-bold">Auto-Mejorar Todo el Catálogo</span>
+                    </>
+                  )}
+                </button>
                 <p className="text-[10px] text-slate-400 text-center px-4 leading-tight">
                   {optimizationMode === 'local' 
                     ? 'Mantiene el formato PNG si es necesario, pero el archivo JSON puede ser muy grande si tienes muchos productos.' 

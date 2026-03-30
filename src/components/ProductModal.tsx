@@ -45,7 +45,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="relative w-full max-w-4xl max-h-[90vh] bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col md:flex-row"
+            className="relative w-full max-w-5xl max-h-[90vh] bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col md:flex-row"
           >
             {/* Close Button - iOS Style */}
             <button
@@ -56,7 +56,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </button>
 
             {/* Image Section */}
-            <div className="w-full md:w-1/2 h-64 md:h-auto bg-white relative p-8">
+            <div className="w-full md:w-1/2 h-64 md:h-auto bg-white relative p-4">
               <img
                 src={imgSrc || undefined}
                 alt={product.name}
