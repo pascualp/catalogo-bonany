@@ -48,12 +48,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const [showCloudinaryGuide, setShowCloudinaryGuide] = useState(false);
 
-  const [hasLocalImages, setHasLocalImages] = useState(false);
+  const [hasImprovableImages, setHasImprovableImages] = useState(false);
 
   React.useEffect(() => {
-    const localCount = products.filter(p => p.image && p.image.startsWith('data:image')).length;
-    setHasLocalImages(localCount > 0);
-  }, [products]);
+    const improvableCount = products.filter(p => {
+      if (!p.image) return false;
+      if (p.image.startsWith('data:image')) return true;
+      if (optimizationMode === 'cloudinary' && !p.image.includes('cloudinary.com')) return true;
+      return false;
+    }).length;
+    setHasImprovableImages(improvableCount > 0);
+  }, [products, optimizationMode]);
 
   React.useEffect(() => {
     loadSettings().then(settings => {
@@ -72,10 +77,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const autoImproveCatalog = async () => {
     if (isOptimizing || isAutoImproving) return;
     
-    const productsToImprove = products.filter(p => p.image && p.image.startsWith('data:image'));
+    showToast('Analizando catálogo para mejoras...');
+    
+    const productsToImprove = products.filter(p => {
+      if (!p.image) return false;
+      // Local images always candidates
+      if (p.image.startsWith('data:image')) return true;
+      // External images are candidates only if we want to move them to Cloudinary
+      if (optimizationMode === 'cloudinary' && !p.image.includes('cloudinary.com')) return true;
+      return false;
+    });
     
     if (productsToImprove.length === 0) {
-      showToast('No hay imágenes locales para mejorar. ¡Todo está optimizado!');
+      showToast('No se encontraron imágenes que necesiten mejora o migración.');
       return;
     }
 
@@ -120,21 +134,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           } else {
             const errorData = await res.json();
             console.error('Cloudinary error:', errorData);
-            // If it's a rate limit or similar, wait longer
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
-          // Respect API limits - 800ms between calls is safer for free tier
           await new Promise(resolve => setTimeout(resolve, 800));
-        } else {
-          // Local re-processing with new high-quality settings
+        } else if (imageUrl.startsWith('data:image')) {
+          // Local re-processing only for local images
           const isPng = imageUrl.startsWith('data:image/png');
           imageUrl = await new Promise((resolve) => {
             const img = new Image();
-            img.crossOrigin = "anonymous"; // Try to avoid CORS issues if any
+            img.crossOrigin = "anonymous";
             img.src = imageUrl;
             img.onload = () => {
               const canvas = document.createElement('canvas');
-              const size = 1600;
+              const size = 2400; // Use the new higher limit
               let width = img.width;
               let height = img.height;
               if (width > height) {
@@ -164,7 +176,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const progress = Math.round((improvedCount / total) * 100);
         setOptimizationProgress(progress);
         
-        // Update state every 3 items to show progress in UI without freezing
         if (improvedCount % 3 === 0 || improvedCount === total) {
           setProducts([...currentProducts]);
         }
@@ -759,7 +770,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </>
                 )}
 
-                {hasLocalImages && !isAutoImproving && (
+                {hasImprovableImages && !isAutoImproving && (
                   <div className="mx-4 p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-start gap-3 animate-pulse">
                     <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600">
                       <Sparkles size={16} />
@@ -767,7 +778,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <div>
                       <h4 className="text-[11px] font-bold text-indigo-900 mb-1">Mejora de Calidad Disponible</h4>
                       <p className="text-[10px] text-indigo-700 leading-relaxed">
-                        Se han detectado imágenes en baja resolución. Pulsa el botón de abajo para <strong>mejorar todo el catálogo automáticamente</strong>.
+                        Se han detectado imágenes que pueden ser optimizadas. Pulsa el botón de abajo para <strong>mejorar todo el catálogo automáticamente</strong>.
                       </p>
                     </div>
                   </div>

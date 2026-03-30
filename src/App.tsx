@@ -16,6 +16,7 @@ import { CATEGORIES, PRODUCTS as DEFAULT_PRODUCTS } from './constants';
 import { EXTERNAL_PRODUCTS_URL } from './config';
 import { Product } from './types';
 import { saveProducts, saveProduct, deleteProduct, deleteProducts, loadProducts, subscribeToProducts, subscribeToLogo, saveLogo, testConnection, loadSettings, saveSettings, getIsQuotaExceeded } from './lib/db';
+import { categorizeProductsBulk } from './services/aiService';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -89,6 +90,7 @@ export default function App() {
   const [logoClicks, setLogoClicks] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [isQuotaBannerDismissed, setIsQuotaBannerDismissed] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -520,129 +522,75 @@ export default function App() {
     const files = event.target.files;
     if (!files) return;
 
-    const newProductsPromises: Promise<Product>[] = Array.from(files as Iterable<File>).map(async (file: File, index: number): Promise<Product> => {
+    setToastMessage(`Procesando ${files.length} imágenes con IA...`);
+
+    const fileList = Array.from(files as Iterable<File>);
+    const productNames = fileList.map(file => {
       const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-      
-      // Extract code from the beginning of the filename (e.g., "123-tomate" -> "123")
       const codeMatch = nameWithoutExt.match(/^(\d+)/);
       const code = codeMatch ? codeMatch[1] : '';
-      
-      // Remove the code from the name and clean up leading hyphens/underscores/spaces
       let cleanName = nameWithoutExt;
       if (code) {
         cleanName = cleanName.substring(code.length);
       }
-      cleanName = cleanName.replace(/^[-_\s]+/, '').replace(/[-_]/g, ' ').trim();
-      
-      // Fallback if name is empty
-      if (!cleanName) {
-        cleanName = 'PRODUCTO';
-      }
-
-      // Determine if local (contains 'mallorca')
-      const isLocal = cleanName.toLowerCase().includes('mallorca');
-
-      // Determine category based on name
-      let category = 'otros';
-      const nameLower = cleanName.toLowerCase();
-      
-      if (nameLower.includes('zumo') || nameLower.includes('jugo') || nameLower.includes('licuado') || nameLower.includes('batido')) {
-        if (nameLower.includes('batido') || nameLower.includes('smoothie')) {
-          category = 'batidos';
-        } else if (nameLower.includes('licuado')) {
-          category = 'licuados';
-        } else if (nameLower.includes('natural')) {
-          category = 'zumos-naturales';
-        } else {
-          category = 'zumos-naturales';
-        }
-      } else if (nameLower.includes('patata') || nameLower.includes('papa')) {
-        category = 'patatas';
-      } else if (nameLower.includes('cebolla') || nameLower.includes('ajo') || nameLower.includes('puerro') || nameLower.includes('cebolleta') || nameLower.includes('chalota')) {
-        category = 'cebollas';
-      } else if (nameLower.includes('germinado') || nameLower.includes('brote')) {
-        category = 'germinados';
-      } else if (nameLower.includes('lechuga') || nameLower.includes('espinaca') || nameLower.includes('acelga') || nameLower.includes('canonigo') || nameLower.includes('canónigo') || nameLower.includes('rucula') || nameLower.includes('rúcula') || nameLower.includes('berro') || nameLower.includes('endivia') || nameLower.includes('escarola')) {
-        category = 'lechugas';
-      } else if (nameLower.includes('hierba') || nameLower.includes('perejil') || nameLower.includes('cilantro') || nameLower.includes('albahaca') || nameLower.includes('menta') || nameLower.includes('romero') || nameLower.includes('tomillo') || nameLower.includes('cebollino') || nameLower.includes('eneldo') || nameLower.includes('oregano') || nameLower.includes('orégano') || nameLower.includes('laurel')) {
-        category = 'hierbas';
-      } else if (nameLower.includes('manzana') || nameLower.includes('pera') || nameLower.includes('naranja') || nameLower.includes('limon') || nameLower.includes('limón') || nameLower.includes('platano') || nameLower.includes('plátano') || nameLower.includes('fresa') || nameLower.includes('uva') || nameLower.includes('melon') || nameLower.includes('melón') || nameLower.includes('sandia') || nameLower.includes('sandía') || nameLower.includes('melocoton') || nameLower.includes('melocotón') || nameLower.includes('cereza') || nameLower.includes('ciruela') || nameLower.includes('kiwi') || nameLower.includes('mango') || nameLower.includes('aguacate') || nameLower.includes('mandarina') || nameLower.includes('pomelo') || nameLower.includes('frambuesa') || nameLower.includes('arandano') || nameLower.includes('arándano')) {
-        category = 'frutas';
-      } else if (nameLower.includes('tomate') || nameLower.includes('pimiento') || nameLower.includes('pepino') || nameLower.includes('calabacin') || nameLower.includes('calabacín') || nameLower.includes('berenjena') || nameLower.includes('calabaza') || nameLower.includes('brocoli') || nameLower.includes('brócoli') || nameLower.includes('coliflor') || nameLower.includes('col') || nameLower.includes('alcachofa') || nameLower.includes('esparrago') || nameLower.includes('espárrago') || nameLower.includes('judia') || nameLower.includes('judía') || nameLower.includes('guisante') || nameLower.includes('haba')) {
-        category = 'hortalizas';
-      } else if (nameLower.includes('seta') || nameLower.includes('champinon') || nameLower.includes('champiñón') || nameLower.includes('portobello') || nameLower.includes('shiitake') || nameLower.includes('boletus') || nameLower.includes('trufa') || nameLower.includes('niscalo') || nameLower.includes('níscalo') || nameLower.includes('girgola') || nameLower.includes('gírgola')) {
-        category = 'setas';
-      } else if (nameLower.includes('zanahoria') || nameLower.includes('rabano') || nameLower.includes('rábano') || nameLower.includes('remolacha') || nameLower.includes('boniato') || nameLower.includes('batata') || nameLower.includes('yuca') || nameLower.includes('jengibre') || nameLower.includes('nabo') || nameLower.includes('chirivia') || nameLower.includes('chirivía') || nameLower.includes('apio')) {
-        category = 'raices';
-      }
-
-      // Determine if seasonal (March in Mallorca) - Exclude juices by default
-      const seasonalKeywords = [
-        'alcachofa', 'guisante', 'haba', 'esparrago', 'espárrago', 'acelga', 'espinaca', 
-        'col', 'coliflor', 'brocoli', 'brócoli', 'puerro', 'zanahoria', 'rabano', 'rábano', 
-        'lechuga', 'naranja', 'limon', 'limón', 'pomelo', 'mandarina', 'fresa', 'freson', 'fresón'
-      ];
-      const isSeasonal = !category.includes('zumo') && !category.includes('batido') && !category.includes('licuado') && 
-                         seasonalKeywords.some(keyword => cleanName.toLowerCase().includes(keyword));
-
-      // Extract size if present (e.g. 250ml, 500ml, 1L)
-      let size = 0;
-      const sizeMatch = nameLower.match(/(\d+)\s*(ml|l)/);
-      if (sizeMatch) {
-        const value = parseInt(sizeMatch[1], 10);
-        const unit = sizeMatch[2];
-        size = unit === 'l' ? value * 1000 : value;
-      }
-
-      // Ensure ID is always unique even if multiple files contain the same number
-      const baseId = code || 'prod';
-      const uniqueSuffix = Math.random().toString(36).substring(2, 9);
-      const id = `${baseId}-${uniqueSuffix}-${index}`;
-      
-      const base64Image = await fileToBase64(file);
-      
-      return {
-        id,
-        code,
-        name: cleanName.toUpperCase(),
-        category,
-        image: base64Image,
-        price: 0,
-        rating: 5.0,
-        description: 'Producto añadido desde imagen.',
-        isLocal,
-        isSeasonal,
-        size,
-      };
+      return cleanName.replace(/^[-_\s]+/, '').replace(/[-_]/g, ' ').trim() || 'PRODUCTO';
     });
 
     try {
+      // Get AI categorizations in bulk
+      const aiResults = await categorizeProductsBulk(productNames);
+
+      const newProductsPromises: Promise<Product>[] = fileList.map(async (file: File, index: number): Promise<Product> => {
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+        const codeMatch = nameWithoutExt.match(/^(\d+)/);
+        const code = codeMatch ? codeMatch[1] : '';
+        
+        let cleanName = productNames[index];
+        const aiResult = aiResults[index];
+
+        // Extract size if present (e.g. 250ml, 500ml, 1L)
+        let size = 0;
+        const sizeMatch = nameWithoutExt.toLowerCase().match(/(\d+)\s*(ml|l)/);
+        if (sizeMatch) {
+          const value = parseInt(sizeMatch[1], 10);
+          const unit = sizeMatch[2];
+          size = unit === 'l' ? value * 1000 : value;
+        }
+
+        const baseId = code || 'prod';
+        const uniqueSuffix = Math.random().toString(36).substring(2, 9);
+        const base64 = await fileToBase64(file);
+
+        return {
+          id: `${baseId}-${uniqueSuffix}-${index}`,
+          code,
+          name: cleanName.toUpperCase(),
+          category: aiResult.category,
+          image: base64,
+          price: 0,
+          rating: 5,
+          description: aiResult.description,
+          isLocal: aiResult.isLocal,
+          isSeasonal: aiResult.isSeasonal,
+          size: size || undefined
+        };
+      });
+
       const results = await Promise.allSettled(newProductsPromises);
-      
       const newProducts = results
         .filter((result): result is PromiseFulfilledResult<Product> => result.status === 'fulfilled')
         .map(result => result.value);
 
-      const failedCount = results.length - newProducts.length;
-
       if (newProducts.length > 0) {
-        try {
-          await saveProducts(newProducts);
-          if (failedCount > 0) {
-            setToastMessage(`¡Éxito! ${newProducts.length} subidos. ${failedCount} fallaron (formato no soportado).`);
-          } else {
-            setToastMessage(`¡Éxito! ${newProducts.length} productos creados correctamente`);
-          }
-        } catch (error) {
-          setToastMessage("Error al guardar productos en la nube");
-        }
+        await saveProducts(newProducts);
+        setToastMessage(`¡Éxito! ${newProducts.length} productos categorizados por IA correctamente`);
       } else {
-        setToastMessage("Error: Ninguna imagen pudo ser procesada (formato no soportado).");
+        setToastMessage("Error: Ninguna imagen pudo ser procesada.");
       }
       setTimeout(() => setToastMessage(null), 4000);
     } catch (error) {
-      console.error("Error uploading images:", error);
-      setToastMessage("Error al procesar las imágenes");
+      console.error('Upload error:', error);
+      setToastMessage('Error al procesar las imágenes con IA');
       setTimeout(() => setToastMessage(null), 3000);
     }
 
@@ -715,7 +663,20 @@ export default function App() {
   if (appSection === 'home') {
     return (
       <>
-        <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans">
+        <div className="min-h-screen bg-[#f2f2f7] flex flex-col items-center justify-center p-6 font-sans relative">
+          {/* Quota Warning Banner for Home */}
+          {getIsQuotaExceeded() && !isQuotaBannerDismissed && (
+            <div className="fixed top-0 left-0 right-0 bg-amber-600 text-white text-[10px] font-bold py-1.5 px-4 text-center z-[100] flex items-center justify-center gap-2 shadow-md">
+              <RefreshCcw size={12} className="animate-spin" />
+              <span>Límite diario de base de datos alcanzado. Tus cambios se guardarán localmente y se sincronizarán mañana.</span>
+              <button 
+                onClick={() => setIsQuotaBannerDismissed(true)}
+                className="ml-2 p-1 hover:bg-white/20 rounded-full transition-colors"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
           <div className="text-center mb-12">
              <img 
                src={customLogo || "/LOGO.png"} 
@@ -768,10 +729,16 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-[#f2f2f7] text-black overflow-hidden relative font-sans">
       {/* Quota Warning Banner */}
-      {getIsQuotaExceeded() && (
+      {getIsQuotaExceeded() && !isQuotaBannerDismissed && (
         <div className="bg-amber-600 text-white text-[10px] font-bold py-1.5 px-4 text-center sticky top-0 z-[100] flex items-center justify-center gap-2 shadow-md">
           <RefreshCcw size={12} className="animate-spin" />
           <span>Límite diario de base de datos alcanzado. Tus cambios se guardarán localmente y se sincronizarán mañana.</span>
+          <button 
+            onClick={() => setIsQuotaBannerDismissed(true)}
+            className="ml-2 p-1 hover:bg-white/20 rounded-full transition-colors"
+          >
+            <X size={12} />
+          </button>
         </div>
       )}
 
