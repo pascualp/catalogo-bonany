@@ -43,6 +43,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [optimizationProgress, setOptimizationProgress] = useState(0);
   const [optimizationMode, setOptimizationMode] = useState<'cloudinary' | 'local'>('local');
 
+  const [showCloudinaryGuide, setShowCloudinaryGuide] = useState(false);
+
   React.useEffect(() => {
     loadSettings().then(settings => {
       if (settings) {
@@ -64,6 +66,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       showToast('Error al guardar configuración');
     }
   };
+
+  const CloudinaryGuide = () => (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden flex flex-col p-8 space-y-6"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-bold text-blue-700">Guía de Configuración</h3>
+          <button onClick={() => setShowCloudinaryGuide(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+        
+        <div className="space-y-4 text-sm text-slate-600 leading-relaxed overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+          <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <p className="font-bold text-blue-800 mb-2">1. Crea tu cuenta</p>
+            <p>Regístrate gratis en <a href="https://cloudinary.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Cloudinary.com</a>.</p>
+          </div>
+          
+          <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <p className="font-bold text-blue-800 mb-2">2. Obtén tu "Cloud Name"</p>
+            <p>Lo verás en el Dashboard principal. Cópialo y pégalo en el campo <strong>Cloud Name</strong> del panel.</p>
+          </div>
+          
+          <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <p className="font-bold text-blue-800 mb-2">3. Crea un "Upload Preset"</p>
+            <ol className="list-decimal ml-4 space-y-1 mt-2">
+              <li>Ve a <strong>Settings</strong> (engranaje abajo a la izquierda).</li>
+              <li>Entra en <strong>Upload</strong>.</li>
+              <li>Baja hasta <strong>Upload presets</strong> y haz clic en <strong>Add upload preset</strong>.</li>
+              <li>En <strong>Signing Mode</strong>, cámbialo a <strong>Unsigned</strong> (¡Importante!).</li>
+              <li>Copia el nombre generado (ej: ml_default) y pégalo en el campo <strong>Upload Preset</strong>.</li>
+              <li>Dale a <strong>Save</strong> arriba a la derecha.</li>
+            </ol>
+          </div>
+
+          <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+            <p className="font-bold text-emerald-800 mb-2">4. Sube tu catálogo</p>
+            <p>Ahora selecciona tu archivo JSON y usa el botón azul de <strong>Subir Imágenes a la Nube</strong>. El sistema subirá todas tus fotos PNG automáticamente y te devolverá un archivo optimizado.</p>
+          </div>
+        </div>
+
+        <button 
+          onClick={() => setShowCloudinaryGuide(false)}
+          className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+        >
+          Entendido
+        </button>
+      </motion.div>
+    </div>
+  );
 
   const optimizeAndUpload = async (file?: File) => {
     let jsonStr = '';
@@ -94,57 +149,82 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setOptimizationProgress(0);
       
       const productsToProcess = [...products];
-      const optimizedProducts = [];
       const total = productsToProcess.length;
-      const concurrency = optimizationMode === 'cloudinary' ? 5 : 20;
+      let completedCount = 0;
 
-      const processProduct = async (p: any, index: number) => {
+      const optimizedProducts = await Promise.all(productsToProcess.map(async (p, index) => {
         let imageUrl = p.image || p.imagen;
 
+        // Skip if already a URL or not base64
         if (imageUrl && imageUrl.startsWith('data:image')) {
           if (optimizationMode === 'cloudinary') {
-            try {
-              const formData = new FormData();
-              formData.append('file', imageUrl);
-              formData.append('upload_preset', cloudinaryUploadPreset);
-              
-              const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
-                method: 'POST',
-                body: formData
-              });
-              
-              if (res.ok) {
-                const cloudData = await res.json();
-                imageUrl = cloudData.secure_url;
+            let retryCount = 0;
+            const maxRetries = 3;
+            
+            while (retryCount <= maxRetries) {
+              try {
+                const formData = new FormData();
+                formData.append('file', imageUrl);
+                formData.append('upload_preset', cloudinaryUploadPreset);
+                
+                const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
+                  method: 'POST',
+                  body: formData
+                });
+                
+                if (res.ok) {
+                  const cloudData = await res.json();
+                  imageUrl = cloudData.secure_url;
+                  break; // Success
+                }
+              } catch (e) {
+                console.error(`Error en producto ${index}:`, e);
               }
-            } catch (e) {
-              console.error('Error uploading to Cloudinary:', e);
+              
+              retryCount++;
+              if (retryCount <= maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+              }
             }
           } else {
-            // Local compression: Resize to very small
+            // Local compression logic
             try {
+              const isPng = imageUrl.startsWith('data:image/png');
               imageUrl = await new Promise((resolve) => {
                 const img = new Image();
                 img.src = imageUrl;
                 img.onload = () => {
                   const canvas = document.createElement('canvas');
-                  const size = 200; // Small size for local storage
-                  canvas.width = size;
-                  canvas.height = size;
+                  const size = 600;
+                  let width = img.width;
+                  let height = img.height;
+                  if (width > height) {
+                    if (width > size) { height *= size / width; width = size; }
+                  } else {
+                    if (height > size) { width *= size / height; height = size; }
+                  }
+                  canvas.width = width;
+                  canvas.height = height;
                   const ctx = canvas.getContext('2d');
                   if (ctx) {
-                    ctx.drawImage(img, 0, 0, size, size);
-                    resolve(canvas.toDataURL('image/jpeg', 0.4)); // Low quality
-                  } else {
-                    resolve(imageUrl);
-                  }
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const format = isPng ? 'image/png' : 'image/jpeg';
+                    const quality = isPng ? undefined : 0.8;
+                    resolve(canvas.toDataURL(format, quality));
+                  } else { resolve(imageUrl); }
                 };
                 img.onerror = () => resolve(imageUrl);
               });
-            } catch (e) {
-              console.error('Error compressing locally:', e);
-            }
+            } catch (e) { console.error('Error local:', e); }
           }
+        }
+
+        completedCount++;
+        // Update progress every 10 items to avoid UI lag
+        if (completedCount % 10 === 0 || completedCount === total) {
+          setOptimizationProgress(Math.round((completedCount / total) * 100));
         }
 
         return {
@@ -152,15 +232,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           image: imageUrl,
           id: p.id || `opt-${Date.now()}-${index}`
         };
-      };
-
-      // Process in chunks
-      for (let i = 0; i < productsToProcess.length; i += concurrency) {
-        const chunk = productsToProcess.slice(i, i + concurrency);
-        const results = await Promise.all(chunk.map((p, idx) => processProduct(p, i + idx)));
-        optimizedProducts.push(...results);
-        setOptimizationProgress(Math.round(((i + chunk.length) / total) * 100));
-      }
+      }));
 
       const finalJson = {
         version: Date.now(),
@@ -202,6 +274,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <X size={20} />
           </button>
         </div>
+
+        {showCloudinaryGuide && <CloudinaryGuide />}
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh] no-scrollbar">
           {getIsQuotaExceeded() && (
@@ -341,7 +415,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div className="pt-4 border-t border-slate-100">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Configuración de Imágenes (Cloudinary)</p>
+                <div className="flex items-center justify-between mb-3 ml-1">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Configuración de Imágenes (Cloudinary)</p>
+                  <button 
+                    onClick={() => setShowCloudinaryGuide(true)}
+                    className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                  >
+                    <Sparkles size={10} />
+                    ¿Cómo configurar?
+                  </button>
+                </div>
                 <div className="space-y-3 p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
                   <div>
                     <label className="text-[10px] font-bold text-blue-700 uppercase ml-1">Cloud Name</label>
@@ -419,9 +502,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
                 <p className="text-[10px] text-slate-400 text-center px-4 leading-tight">
                   {optimizationMode === 'local' 
-                    ? 'Reduce las fotos al mínimo para que GitHub las acepte sin configurar nada.' 
-                    : 'Saca las fotos del archivo y las guarda en Cloudinary (máxima calidad).'}
+                    ? 'Mantiene el formato PNG si es necesario, pero el archivo JSON puede ser muy grande si tienes muchos productos.' 
+                    : 'Saca las fotos del archivo y las guarda en Cloudinary. Es la mejor opción para 3000+ productos con alta calidad.'}
                 </p>
+                {optimizationMode === 'local' && (
+                  <div className="mx-4 p-3 bg-amber-50 rounded-xl border border-amber-100">
+                    <p className="text-[10px] text-amber-700 leading-tight">
+                      <strong>Nota sobre PNG:</strong> Si tus imágenes son PNG, las mantendremos así para no perder calidad, pero ten en cuenta que el archivo final será pesado. Si GitHub lo rechaza por tamaño, usa la opción de <strong>Cloudinary</strong>.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-slate-100">

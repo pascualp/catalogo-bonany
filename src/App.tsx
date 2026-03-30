@@ -20,6 +20,7 @@ import { saveProducts, saveProduct, deleteProduct, deleteProducts, loadProducts,
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    const isPng = file.type === 'image/png';
     reader.readAsDataURL(file);
     reader.onload = (event) => {
       const img = new Image();
@@ -48,7 +49,11 @@ const fileToBase64 = (file: File): Promise<string> => {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          // If it's PNG, we keep it as PNG to maintain transparency and quality
+          // Otherwise use JPEG for better compression
+          const dataUrl = isPng 
+            ? canvas.toDataURL('image/png') 
+            : canvas.toDataURL('image/jpeg', 0.8);
           resolve(dataUrl);
         } else {
           resolve(event.target?.result as string);
