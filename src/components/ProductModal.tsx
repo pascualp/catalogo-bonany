@@ -56,21 +56,23 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </button>
 
             {/* Image Section */}
-            <div className="w-full md:w-1/2 h-64 md:h-auto bg-slate-50 relative overflow-hidden flex items-center justify-center p-8">
+            <div className="w-full md:w-1/2 h-64 md:h-auto min-h-[300px] bg-slate-50 relative overflow-hidden flex items-center justify-center p-8">
               {/* Blurred Background for premium feel */}
               <div 
                 className="absolute inset-0 opacity-40 blur-3xl scale-125 bg-center bg-cover transition-all duration-500"
                 style={{ backgroundImage: `url(${imgSrc})` }}
               />
               
-              {/* Main Image */}
-              <img
-                src={imgSrc || undefined}
-                alt={product.name}
-                className="relative z-10 w-full h-full object-scale-down drop-shadow-2xl transition-transform duration-500 hover:scale-105"
-                referrerPolicy="no-referrer"
-                onError={() => setImgError(true)}
-              />
+              {/* Main Image - Constrained size to prevent pixelation */}
+              <div className="relative z-10 w-48 h-48 md:w-64 md:h-64 flex items-center justify-center">
+                <img
+                  src={imgSrc || undefined}
+                  alt={product.name}
+                  className="max-w-full max-h-full object-contain drop-shadow-2xl transition-transform duration-500 hover:scale-105"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgError(true)}
+                />
+              </div>
               
               <div className="absolute top-6 left-6 flex flex-col gap-2 z-20">
                 {product.isLocal && (

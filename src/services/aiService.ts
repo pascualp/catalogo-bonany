@@ -50,7 +50,10 @@ export async function categorizeProduct(productName: string): Promise<Categoriza
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
+    // Clean potential markdown formatting from the response
+    const rawText = response.text || "{}";
+    const cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const result = JSON.parse(cleanText);
     
     // Validate category exists
     const validCategory = CATEGORIES.find(c => c.id === result.category);
@@ -63,7 +66,7 @@ export async function categorizeProduct(productName: string): Promise<Categoriza
     console.error("Error categorizing product with AI:", error);
     // Fallback logic if AI fails
     return {
-      category: "otros",
+      category: guessCategoryLocally(productName),
       isLocal: productName.toLowerCase().includes("mallorca"),
       isSeasonal: false,
       description: `Producto: ${productName}`
@@ -112,18 +115,47 @@ export async function categorizeProductsBulk(productNames: string[]): Promise<Ca
       }
     });
 
-    const results = JSON.parse(response.text || "[]");
-    return results.map((r: any) => ({
-      ...r,
-      category: CATEGORIES.find(c => c.id === r.category) ? r.category : "otros"
-    }));
+    // Clean potential markdown formatting from the response
+    const rawText = response.text || "[]";
+    const cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const results = JSON.parse(cleanText);
+    
+    return productNames.map((name, index) => {
+      const r = results[index] || {};
+      return {
+        category: CATEGORIES.find(c => c.id === r.category) ? r.category : guessCategoryLocally(name),
+        isLocal: r.isLocal ?? name.toLowerCase().includes("mallorca"),
+        isSeasonal: r.isSeasonal ?? false,
+        description: r.description || `Producto: ${name}`
+      };
+    });
   } catch (error) {
     console.error("Error in bulk categorization:", error);
     return productNames.map(name => ({
-      category: "otros",
+      category: guessCategoryLocally(name),
       isLocal: name.toLowerCase().includes("mallorca"),
       isSeasonal: false,
       description: `Producto: ${name}`
     }));
   }
+}
+
+// Local fallback logic in case AI fails or is rate-limited
+function guessCategoryLocally(name: string): string {
+  const nameLower = name.toLowerCase();
+  if (nameLower.includes('zumo') || nameLower.includes('jugo') || nameLower.includes('licuado') || nameLower.includes('batido')) {
+    if (nameLower.includes('batido') || nameLower.includes('smoothie')) return 'batidos';
+    if (nameLower.includes('licuado')) return 'licuados';
+    return 'zumos-naturales';
+  }
+  if (nameLower.includes('patata') || nameLower.includes('papa')) return 'patatas';
+  if (nameLower.includes('cebolla') || nameLower.includes('ajo') || nameLower.includes('puerro')) return 'cebollas';
+  if (nameLower.includes('germinado') || nameLower.includes('brote')) return 'germinados';
+  if (nameLower.includes('lechuga') || nameLower.includes('espinaca') || nameLower.includes('acelga') || nameLower.includes('rucula')) return 'lechugas';
+  if (nameLower.includes('hierba') || nameLower.includes('perejil') || nameLower.includes('cilantro') || nameLower.includes('albahaca') || nameLower.includes('menta')) return 'hierbas';
+  if (nameLower.includes('manzana') || nameLower.includes('pera') || nameLower.includes('naranja') || nameLower.includes('limon') || nameLower.includes('platano') || nameLower.includes('fresa') || nameLower.includes('uva') || nameLower.includes('melon') || nameLower.includes('sandia') || nameLower.includes('melocoton') || nameLower.includes('cereza') || nameLower.includes('kiwi') || nameLower.includes('mango') || nameLower.includes('aguacate')) return 'frutas';
+  if (nameLower.includes('tomate') || nameLower.includes('pimiento') || nameLower.includes('pepino') || nameLower.includes('calabacin') || nameLower.includes('berenjena') || nameLower.includes('calabaza') || nameLower.includes('brocoli') || nameLower.includes('coliflor') || nameLower.includes('alcachofa') || nameLower.includes('esparrago')) return 'hortalizas';
+  if (nameLower.includes('seta') || nameLower.includes('champinon') || nameLower.includes('portobello') || nameLower.includes('shiitake') || nameLower.includes('trufa')) return 'setas';
+  if (nameLower.includes('zanahoria') || nameLower.includes('rabano') || nameLower.includes('remolacha') || nameLower.includes('boniato') || nameLower.includes('jengibre')) return 'raices';
+  return 'otros';
 }
